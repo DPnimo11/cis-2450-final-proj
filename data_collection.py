@@ -113,7 +113,7 @@ def main():
     # 1. Fetch Social Data
     all_posts = []
     for t in tickers:
-        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=30)
+        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=50)
         all_posts.append(df_posts)
         
     social_df = pl.concat(all_posts)
@@ -128,15 +128,22 @@ def main():
         pl.col('Timestamp').dt.replace_time_zone("UTC").dt.truncate("1h").cast(pl.Datetime("us", "UTC"))
     )
     
-    # Aggregate sentiment by hour
-    social_agg_df = social_df.group_by(['Ticker', 'Timestamp']).agg(
-        pl.col('Sentiment').mean().alias('Average_Sentiment'),
-        pl.col('Sentiment').count().alias('Post_Count')
+    # Instead of deleting rows by grouping, we use a window function to count total hourly volume
+    # This keeps every individual post as its own row (allowing us to reach 50,000 rows easily!)
+    social_df = social_df.with_columns(
+        pl.len().over(['Ticker', 'Timestamp']).alias('Post_Count')
     )
     
     # Determine the date range needed
-    min_date = social_agg_df['Timestamp'].min()
-    max_date = social_agg_df['Timestamp'].max() + timedelta(days=1)
+    min_date = social_df['Timestamp'].min()
+    max_date = social_df['Timestamp'].max() + timedelta(days=1)
+    
+    # Yahoo Finance only serves hourly data for the last 730 days.
+    # Clamp min_date to 700 days ago to stay safely within that window.
+    earliest_allowed = datetime.now(tz=min_date.tzinfo) - timedelta(days=700)
+    if min_date < earliest_allowed:
+        print(f"Clamping start date from {min_date.date()} to {earliest_allowed.date()} (YF 730-day limit)")
+        min_date = earliest_allowed
     
     # Polars date conversion to string for YF
     start_str = min_date.strftime("%Y-%m-%d") if min_date else "2024-01-01"
@@ -156,17 +163,18 @@ def main():
     
     # 3. Merge Datasets
     print("Merging datasets using Polars...")
-    merged_df = finance_df.join(social_agg_df, on=['Ticker', 'Timestamp'], how='inner')
+    # Join the financial data ONTO the social data so we keep every individual post row
+    merged_df = social_df.join(finance_df, on=['Ticker', 'Timestamp'], how='inner')
     
     # Handle Null values and outliers using Polars expressions
-    merged_df = merged_df.drop_nulls(subset=['Close', 'Volume', 'Average_Sentiment'])
+    merged_df = merged_df.drop_nulls(subset=['Close', 'Volume', 'Sentiment'])
     merged_df = merged_df.filter(pl.col('Volume') > 0)
     
     # Save & Append logic to slowly build to 50,000 threshold over multiple cron runs
     os.makedirs("data", exist_ok=True)
     output_path = os.path.join("data", "merged_financial_sentiment_data.csv")
     
-    if os.path.exists(output_path):
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         print("Found existing dataset. Appending and dropping duplicates...")
         existing_df = pl.read_csv(output_path)
         # Align datatypes on the incoming existing data
