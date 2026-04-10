@@ -1,0 +1,12 @@
+pandas
+polars
+requests
+yfinance
+nltk
+matplotlib
+seaborn
+scikit-learn
+notebook
+jupyter
+atproto
+python-dotenv
