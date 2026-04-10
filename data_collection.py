@@ -37,7 +37,7 @@ def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
         client.login(BLUESKY_HANDLE, BLUESKY_PASSWORD)
     except Exception as e:
         print(f"Failed to login to Bluesky. Did you set your handle and app password? Error: {e}")
-        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Utf8, "Text": pl.Utf8, "Sentiment": pl.Float64})
+        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
         
     posts_data = []
     cursor = None
@@ -53,10 +53,11 @@ def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
                 created_at = getattr(post.record, 'created_at', '')
                 
                 if text and created_at:
+                    dt_utc = pd.to_datetime(created_at, utc=True).replace(tzinfo=None)
                     sentiment_score = sia.polarity_scores(text)['compound']
                     posts_data.append({
                         "Ticker": ticker,
-                        "Timestamp": created_at,
+                        "Timestamp": dt_utc,
                         "Text": text.replace('\n', ' ').strip(),
                         "Sentiment": sentiment_score
                     })
@@ -72,7 +73,7 @@ def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
             break
             
     if not posts_data:
-        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Utf8, "Text": pl.Utf8, "Sentiment": pl.Float64})
+        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
         
     return pl.DataFrame(posts_data)
 
@@ -117,10 +118,10 @@ def main():
         print("No social data fetched. Exiting.")
         return
         
-    # Convert string to datetime and truncate to hour in Polars
-    # format='mixed' equivalent in polars natively handles standard ISO
+    # Native datetime objects are automatically imported as Polars datetimes.
+    # We assign them the correct UTC timezone context natively and truncate.
     social_df = social_df.with_columns(
-        pl.col('Timestamp').str.to_datetime().dt.truncate("1h")
+        pl.col('Timestamp').dt.replace_time_zone("UTC").dt.truncate("1h")
     )
     
     # Aggregate sentiment by hour
