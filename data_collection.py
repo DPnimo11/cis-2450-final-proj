@@ -104,12 +104,16 @@ def collect_financial_data(tickers, start_date, end_date):
     return pl.DataFrame()
 
 def main():
-    tickers = ["$AAPL", "$NVDA", "$TSLA", "$GME"]
+    tickers = [
+        "$AAPL", "$NVDA", "$TSLA", "$GME", "$MSFT", "$AMZN", "$META", "$GOOGL", 
+        "$AMD", "$SMCI", "$PLTR", "$AMC", "$INTC", "$NFLX", "$COIN", "$MSTR", 
+        "$HOOD", "$BABA", "$SPY", "$QQQ", "$DJT", "$RDDT", "$ARM"
+    ]
     
     # 1. Fetch Social Data
     all_posts = []
     for t in tickers:
-        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=10)
+        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=30)
         all_posts.append(df_posts)
         
     social_df = pl.concat(all_posts)
@@ -119,9 +123,9 @@ def main():
         return
         
     # Native datetime objects are automatically imported as Polars datetimes.
-    # We assign them the correct UTC timezone context natively and truncate.
+    # We assign them the correct UTC timezone context natively, truncate, and force `us` precision.
     social_df = social_df.with_columns(
-        pl.col('Timestamp').dt.replace_time_zone("UTC").dt.truncate("1h")
+        pl.col('Timestamp').dt.replace_time_zone("UTC").dt.truncate("1h").cast(pl.Datetime("us", "UTC"))
     )
     
     # Aggregate sentiment by hour
@@ -145,9 +149,9 @@ def main():
         print("No financial data fetched. Exiting.")
         return
         
-    # Convert YF timezone to UTC natively in Polars and truncate
+    # Convert YF timezone to UTC natively in Polars, truncate, and lock precision matching
     finance_df = finance_df.with_columns(
-        pl.col('Timestamp').dt.convert_time_zone("UTC").dt.truncate("1h")
+        pl.col('Timestamp').dt.convert_time_zone("UTC").dt.truncate("1h").cast(pl.Datetime("us", "UTC"))
     )
     
     # 3. Merge Datasets
@@ -158,13 +162,23 @@ def main():
     merged_df = merged_df.drop_nulls(subset=['Close', 'Volume', 'Average_Sentiment'])
     merged_df = merged_df.filter(pl.col('Volume') > 0)
     
-    # Save the full dataset
+    # Save & Append logic to slowly build to 50,000 threshold over multiple cron runs
     os.makedirs("data", exist_ok=True)
     output_path = os.path.join("data", "merged_financial_sentiment_data.csv")
+    
+    if os.path.exists(output_path):
+        print("Found existing dataset. Appending and dropping duplicates...")
+        existing_df = pl.read_csv(output_path)
+        # Align datatypes on the incoming existing data
+        existing_df = existing_df.with_columns(
+            pl.col('Timestamp').str.replace(" UTC", "").str.replace("Z", "").str.to_datetime().dt.replace_time_zone("UTC").dt.truncate("1h").cast(pl.Datetime("us", "UTC"))
+        )
+        # Combine and deduplicate
+        merged_df = pl.concat([existing_df, merged_df], how="vertical_relaxed").unique(subset=['Ticker', 'Timestamp'], keep='last')
+        
     merged_df.write_csv(output_path)
     
-    print(f"Data collection complete! Saved {merged_df.height} rows to {output_path}")
-    print(f"Note: To hit the 50,000 threshold, you may need to run this periodically and append to the dataset.")
+    print(f"Data collection complete! Dataset now has {merged_df.height} rows globally at {output_path}")
 
 if __name__ == "__main__":
     main()
