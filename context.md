@@ -6,9 +6,10 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 ## Current state
 - **Data collection (`data_collection.py`)**: Fully functional and running. Scrapes Bluesky via `atproto`, scores sentiment with ProsusAI/FinBERT, fetches hourly Yahoo Finance data, performs a left join on `(Ticker, Timestamp)`, forward/backward fills financial columns for off-market hours, and appends to a growing CSV. The current dataset has **~194,891 rows** (well above the 50k requirement).
 - **Notebook organization**: The old combined `eda_and_modeling.ipynb` is still present as a backup. New work has been split into `notebooks/01_data_audit_and_eda.ipynb`, `notebooks/02_feature_engineering.ipynb`, and `notebooks/03_modeling_and_results.ipynb`, with shared helper functions in `src/`.
-- **Step 1 clean modeling input**: `data/processed/modeling_dataset.csv` has been generated from the raw CSV. It filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and contains **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
-- **Step 2 hybrid target dataset**: `data/processed/hybrid_target_dataset.csv` has been generated from the clean ticker-hour data. It uses a tunable **0.1% return threshold**, drops tiny neutral moves, and contains **13,325 labeled rows**: intraday down/up = **4,995 / 5,001**, overnight down/up = **1,587 / 1,742**.
-- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The final modeling notebook still needs to be updated to use the hybrid target dataset. **No advanced models, SMOTE, hyperparameter tuning, final feature engineering, or dashboard have been implemented yet.**
+- **Step 1 clean modeling input**: The feature-engineering notebook filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and validates **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
+- **Step 2 hybrid target dataset**: The feature-engineering notebook builds a hybrid intraday/overnight target with a tunable **0.1% return threshold**, drops tiny neutral moves, and validates **13,325 labeled rows**: intraday down/up = **4,995 / 5,001**, overnight down/up = **1,587 / 1,742**.
+- **Step 3 final feature dataset**: `data/processed/feature_dataset.csv` is the only processed CSV artifact kept for modeling. It contains **13,325 rows**, **70 columns**, **0 nulls**, and includes lag returns, volume anomaly, sentiment EMA/z-score, post-count anomaly, time features, target-type flags, and ticker indicators.
+- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The final modeling notebook still needs to be updated to use `data/processed/feature_dataset.csv`. **No advanced models, SMOTE, hyperparameter tuning, or dashboard have been implemented yet.**
 - **Raw data is stored** in `data/raw/merged_financial_sentiment_data.csv` (~60MB, gitignored). Processed modeling data is stored in `data/processed/`.
 
 ## Codebase map
@@ -20,8 +21,7 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - `src/` — Shared helper modules for config, data loading, feature engineering, modeling, evaluation, and plotting.
 - `outputs/` — Generated figures, model artifacts, and report tables for dashboard/presentation reuse.
 - `data/raw/merged_financial_sentiment_data.csv` — The raw merged dataset from data collection (gitignored, ~194k rows).
-- `data/processed/modeling_dataset.csv` — Step 1 clean targetless modeling input (gitignored CSV artifact, ~12MB).
-- `data/processed/hybrid_target_dataset.csv` — Step 2 target-bearing hybrid intraday/overnight dataset (gitignored CSV artifact, ~5.5MB).
+- `data/processed/feature_dataset.csv` — Final processed modeling dataset (gitignored CSV artifact, ~10MB).
 - `.env` — Bluesky credentials (`BLUESKY_HANDLE`, `BLUESKY_PASSWORD`). **Do NOT commit.**
 - `requirements.txt` — Python dependencies (pandas, polars, yfinance, atproto, transformers, torch, scikit-learn, etc.).
 - `venv/` — Python 3.13 virtual environment (gitignored).
@@ -77,10 +77,10 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 ```
 
 ## Known issues / bugs
-- **Severe class imbalance**: Only ~5% of rows are labeled "Up" (`Close > Open`). This is primarily because overnight and weekend hours have the same `Close` value (forward-filled), so those rows always map to "Down/Flat." The baseline model gets 93% recall on "Up" but only 7% precision, with 40% overall accuracy.
-- **Target variable is flawed**: Using `Close > Open` on the same forward-filled row doesn't capture real price movement. Overnight and off-market rows have identical `Open`/`Close` (both forward-filled from the same source), flooding the target with "Down" labels.
+- **Old baseline target was flawed**: The original post-level baseline target created severe class imbalance and overweighted high-post hours. This is now addressed in `notebooks/02_feature_engineering.ipynb` with ticker-hour aggregation and a hybrid intraday/overnight target.
 - **Neutral sentiment dominance**: Even with FinBERT, the vast majority of sentiment scores cluster near zero (neutral). Raw sentiment alone is a weak predictor.
-- **Data collection preserves one row per post** (not one row per hour). This means viral hours with many tweets get disproportionately many rows, all sharing the same financial target. This distorts the model.
+- **Raw data collection preserves one row per post** (not one row per hour). This is still true in raw data, but final modeling now uses aggregated ticker-hour and hybrid target rows.
+- **Modeling notebook still needs replacement**: `notebooks/03_modeling_and_results.ipynb` still reflects the old baseline workflow and must be updated to load `data/processed/feature_dataset.csv`.
 
 ## Constraints / preferences
 - **Must use Polars** for data wrangling (course topic).
@@ -102,29 +102,22 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - Old commented-out version of `fetch_bluesky_posts` is still in `data_collection.py` wrapped in triple quotes.
 - Added progress printing during Bluesky scraping (page-by-page indicators).
 - Split the old combined notebook into rubric-aligned notebooks and added reusable `src/` helper modules.
-- Completed Step 1 clean modeling input: valid finance-window filtering plus ticker-hour aggregation saved to `data/processed/modeling_dataset.csv`.
-- Reorganized local CSV artifacts: raw collection output now lives under `data/raw/`, processed modeling input under `data/processed/`, and `outputs/` is reserved for figures, models, and report tables.
-- Completed Step 2 hybrid target dataset with tunable thresholding and intraday/overnight target types saved to `data/processed/hybrid_target_dataset.csv`.
+- Completed Step 1 clean modeling input in memory: valid finance-window filtering plus ticker-hour aggregation.
+- Reorganized local CSV artifacts: raw collection output now lives under `data/raw/`, final processed modeling input under `data/processed/`, and `outputs/` is reserved for figures, models, and report tables.
+- Completed Step 2 hybrid target construction with tunable thresholding and intraday/overnight target types.
+- Completed Step 3 final feature dataset saved to `data/processed/feature_dataset.csv`; superseded intermediate processed CSVs were removed.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
 
 1. **Fix target variable / class imbalance** (CRITICAL):
-   - Step 1 is complete: use `data/processed/modeling_dataset.csv` as the clean ticker-hour input.
-   - Step 2 is complete: use `data/processed/hybrid_target_dataset.csv` as the target-bearing modeling input.
+   - Step 1 and Step 2 are complete inside `notebooks/02_feature_engineering.ipynb`.
+   - Step 3 is complete: use `data/processed/feature_dataset.csv` as the modeling input.
    - The hybrid target substantially improves the class balance versus the old post-level target.
 
-2. **Feature engineering** (in notebook, NOT in data_collection.py):
-   - Resample sentiment to a continuous hourly timeline (fill missing hours with 0).
-   - Calculate **EMA** of sentiment (short ~4h, long ~24h) — must be done BEFORE joining financial data.
-   - Consider **Sentiment Z-Score** (standardize relative to a rolling window) to amplify rare spikes.
-   - Consider a **Bullishness Index**: `(#positive - #negative) / #total` per hour.
-   - `Post_Count` per hour is already available as a feature.
-   - **Financial Features** to complement sentiment:
-     - **Past 1-hour Return**: `(Close - Open) / Open` for the current hour.
-     - **Past 24-hour Return**: Trailing 24-hour stock performance.
-     - **Financial Volume Anomaly**: Standardized/Z-score of trading volume to detect unusual market activity.
-     - **Hour of Day**: Integer (0-23) to capture intraday seasonality.
+2. **Feature engineering** (DONE in notebook 02):
+   - Added sentiment EMA features, sentiment z-score, bullishness index, post-count anomaly, lag returns, volume anomaly, time features, target-type flags, and ticker indicators.
+   - `Target_Return`, `Target_Price`, and other target columns remain in the final CSV for evaluation/explanation but must be excluded from training features.
 
 3. **Modeling pipeline** (in notebook):
    - Apply **SMOTE** (or up/downsampling) AFTER train-test split.

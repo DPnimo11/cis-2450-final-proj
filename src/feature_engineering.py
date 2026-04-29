@@ -1,4 +1,5 @@
 import warnings
+import math
 
 import polars as pl
 
@@ -10,6 +11,9 @@ from src.config import (
     MARKET_TIME_ZONE,
     MAX_INTRADAY_HORIZON_HOURS,
     MAX_OVERNIGHT_HORIZON_HOURS,
+    ROLLING_FEATURE_WINDOW,
+    SHORT_SENTIMENT_EMA_SPAN,
+    LONG_SENTIMENT_EMA_SPAN,
     TARGET_RETURN_THRESHOLD,
 )
 
@@ -397,3 +401,179 @@ def build_hybrid_target_dataset(
         drop_neutral=drop_neutral,
     )
     return pl.concat([intraday, overnight], how="vertical").sort(["Ticker", "Timestamp"])
+
+
+def _safe_z_score(
+    value_col: str,
+    mean_col: str,
+    std_col: str,
+    output_col: str,
+    clip_abs: float = 10.0,
+) -> pl.Expr:
+    return (
+        pl.when(pl.col(std_col) > 0)
+        .then((pl.col(value_col) - pl.col(mean_col)) / pl.col(std_col))
+        .otherwise(0.0)
+        .clip(-clip_abs, clip_abs)
+        .alias(output_col)
+    )
+
+
+def build_hourly_history_features(
+    hourly_df: pl.DataFrame,
+    rolling_window: int = ROLLING_FEATURE_WINDOW,
+) -> pl.DataFrame:
+    """Create lagged and rolling features keyed by ticker-hour."""
+    hourly = (
+        recompute_bullishness_index(hourly_df)
+        .sort(["Ticker", "Timestamp"])
+        .with_columns(
+            [
+                ((pl.col("Close") - pl.col("Open")) / pl.col("Open")).alias("Hourly_Return"),
+                ((pl.col("High") - pl.col("Low")) / pl.col("Open")).alias("High_Low_Range"),
+                pl.col("Volume").log1p().alias("Log_Volume"),
+                (pl.col("Close") / pl.col("Close").shift(1).over("Ticker") - 1).alias(
+                    "Close_Return_1"
+                ),
+                (pl.col("Close") / pl.col("Close").shift(6).over("Ticker") - 1).alias(
+                    "Close_Return_6"
+                ),
+                (pl.col("Close") / pl.col("Close").shift(24).over("Ticker") - 1).alias(
+                    "Close_Return_24"
+                ),
+                pl.col("Sentiment_Mean")
+                .ewm_mean(span=SHORT_SENTIMENT_EMA_SPAN, adjust=False)
+                .over("Ticker")
+                .alias("Sentiment_EMA_4"),
+                pl.col("Sentiment_Mean")
+                .ewm_mean(span=LONG_SENTIMENT_EMA_SPAN, adjust=False)
+                .over("Ticker")
+                .alias("Sentiment_EMA_24"),
+            ]
+        )
+        .with_columns(
+            [
+                pl.col("Volume")
+                .shift(1)
+                .rolling_mean(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Volume_Rolling_Mean_24"),
+                pl.col("Volume")
+                .shift(1)
+                .rolling_std(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Volume_Rolling_Std_24"),
+                pl.col("Sentiment_Mean")
+                .shift(1)
+                .rolling_mean(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Sentiment_Rolling_Mean_24"),
+                pl.col("Sentiment_Mean")
+                .shift(1)
+                .rolling_std(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Sentiment_Rolling_Std_24"),
+                pl.col("Post_Count")
+                .shift(1)
+                .rolling_mean(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Post_Count_Rolling_Mean_24"),
+                pl.col("Post_Count")
+                .shift(1)
+                .rolling_std(window_size=rolling_window)
+                .over("Ticker")
+                .alias("Post_Count_Rolling_Std_24"),
+            ]
+        )
+        .with_columns(
+            [
+                _safe_z_score(
+                    "Volume", "Volume_Rolling_Mean_24", "Volume_Rolling_Std_24", "Volume_Z_24"
+                ),
+                _safe_z_score(
+                    "Sentiment_Mean",
+                    "Sentiment_Rolling_Mean_24",
+                    "Sentiment_Rolling_Std_24",
+                    "Sentiment_Z_24",
+                ),
+                _safe_z_score(
+                    "Post_Count",
+                    "Post_Count_Rolling_Mean_24",
+                    "Post_Count_Rolling_Std_24",
+                    "Post_Count_Z_24",
+                ),
+            ]
+        )
+    )
+
+    return hourly.select(
+        [
+            "Ticker",
+            "Timestamp",
+            "Hourly_Return",
+            "High_Low_Range",
+            "Log_Volume",
+            "Close_Return_1",
+            "Close_Return_6",
+            "Close_Return_24",
+            "Sentiment_EMA_4",
+            "Sentiment_EMA_24",
+            "Volume_Z_24",
+            "Sentiment_Z_24",
+            "Post_Count_Z_24",
+        ]
+    )
+
+
+def add_time_and_category_features(df: pl.DataFrame) -> pl.DataFrame:
+    """Add model-ready time, target-type, and ticker indicator features."""
+    local_ts = pl.col("Timestamp").dt.convert_time_zone(MARKET_TIME_ZONE)
+    featured = df.with_columns(
+        [
+            local_ts.dt.hour().alias("Signal_Hour"),
+            local_ts.dt.weekday().alias("Signal_Weekday"),
+            local_ts.dt.month().alias("Signal_Month"),
+            (pl.col("Target_Type") == "overnight").cast(pl.Int8).alias("Is_Overnight"),
+            (pl.col("Target_Type") == "intraday").cast(pl.Int8).alias("Is_Intraday"),
+        ]
+    ).with_columns(
+        [
+            ((2 * math.pi * pl.col("Signal_Hour")) / 24).sin().alias("Signal_Hour_Sin"),
+            ((2 * math.pi * pl.col("Signal_Hour")) / 24).cos().alias("Signal_Hour_Cos"),
+            ((2 * math.pi * pl.col("Signal_Weekday")) / 7).sin().alias(
+                "Signal_Weekday_Sin"
+            ),
+            ((2 * math.pi * pl.col("Signal_Weekday")) / 7).cos().alias(
+                "Signal_Weekday_Cos"
+            ),
+        ]
+    )
+
+    tickers = sorted(featured.get_column("Ticker").unique().to_list())
+    ticker_flags = [
+        (pl.col("Ticker") == ticker).cast(pl.Int8).alias(f"Ticker_{ticker.removeprefix('$')}")
+        for ticker in tickers
+    ]
+
+    return featured.with_columns(ticker_flags)
+
+
+def build_feature_dataset(
+    hybrid_df: pl.DataFrame,
+    hourly_df: pl.DataFrame,
+    rolling_window: int = ROLLING_FEATURE_WINDOW,
+) -> pl.DataFrame:
+    """Build the final model-ready feature dataset from hybrid targets and hourly history."""
+    hourly_features = build_hourly_history_features(hourly_df, rolling_window=rolling_window)
+    featured = (
+        hybrid_df.join(hourly_features, on=["Ticker", "Timestamp"], how="left")
+        .pipe(add_time_and_category_features)
+        .sort(["Ticker", "Timestamp", "Target_Type"])
+    )
+
+    numeric_cols = [
+        col
+        for col, dtype in featured.schema.items()
+        if dtype.is_numeric() or dtype == pl.Boolean
+    ]
+    return featured.with_columns([pl.col(col).fill_null(0) for col in numeric_cols])
