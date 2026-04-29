@@ -5,31 +5,34 @@ import polars as pl
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import torch
+from transformers import pipeline
 from atproto import Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Ensure NLTK vader lexicon is available
-try:
-    nltk.data.find('sentiment/vader_lexicon.zip')
-except LookupError:
-    nltk.download('vader_lexicon')
+print("Loading FinBERT...")
 
-sia = SentimentIntensityAnalyzer()
+# Add these print statements
+has_cuda = torch.cuda.is_available()
+print(f"PyTorch detects CUDA (GPU): {has_cuda}")
+
+device = 0 if has_cuda else -1
+print(f"FinBERT is loading on: {'GPU' if device == 0 else 'CPU (WARNING: This will be slow)'}")
+
+finbert = pipeline("sentiment-analysis", model="ProsusAI/finbert", top_k=None, device=device)
 
 # ==========================================
 # BLUESKY CREDENTIALS LOADED FROM .env
 # ==========================================
 BLUESKY_HANDLE = os.environ.get('BLUESKY_HANDLE', 'dpnimo11.bsky.social')
 BLUESKY_PASSWORD = os.environ.get('BLUESKY_PASSWORD', '')
-
+"""
 def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
-    """
+    
     Fetches historical posts from Bluesky containing a specific cashtag via atproto.
-    """
+    
     print(f"Fetching Bluesky data for {ticker} using atproto...")
     
     client = Client()
@@ -48,17 +51,30 @@ def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
                 params={'q': ticker, 'limit': limit, 'cursor': cursor}
             )
             
+            texts = []
+            valid_posts = []
             for post in response.posts:
                 text = getattr(post.record, 'text', '')
                 created_at = getattr(post.record, 'created_at', '')
                 
                 if text and created_at:
                     dt_utc = pd.to_datetime(created_at, utc=True).replace(tzinfo=None)
-                    sentiment_score = sia.polarity_scores(text)['compound']
+                    clean_text = text.replace('\n', ' ').strip()
+                    valid_posts.append((dt_utc, clean_text))
+                    texts.append(clean_text)
+            
+            if texts:
+                sentiments = finbert(texts)
+                for (dt_utc, clean_text), sent_results in zip(valid_posts, sentiments):
+                    # ProsusAI/finbert returns labels 'positive', 'negative', 'neutral'
+                    pos = next((x['score'] for x in sent_results if x['label'] == 'positive'), 0)
+                    neg = next((x['score'] for x in sent_results if x['label'] == 'negative'), 0)
+                    sentiment_score = pos - neg
+                    
                     posts_data.append({
                         "Ticker": ticker,
                         "Timestamp": dt_utc,
-                        "Text": text.replace('\n', ' ').strip(),
+                        "Text": clean_text,
                         "Sentiment": sentiment_score
                     })
             
@@ -70,6 +86,75 @@ def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
             
         except Exception as e:
             print(f"Error fetching page {page} for {ticker}: {e}")
+            break
+            
+    if not posts_data:
+        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
+        
+    return pl.DataFrame(posts_data)
+"""
+def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
+    """
+    Fetches historical posts from Bluesky containing a specific cashtag via atproto.
+    """
+    print(f"\nFetching Bluesky data for {ticker} using atproto...")
+    
+    client = Client()
+    try:
+        client.login(BLUESKY_HANDLE, BLUESKY_PASSWORD)
+    except Exception as e:
+        print(f"Failed to login to Bluesky. Did you set your handle and app password? Error: {e}")
+        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
+        
+    posts_data = []
+    cursor = None
+    
+    for page in range(max_pages):
+        try:
+            response = client.app.bsky.feed.search_posts(
+                params={'q': ticker, 'limit': limit, 'cursor': cursor}
+            )
+            
+            texts = []
+            valid_posts = []
+            for post in response.posts:
+                text = getattr(post.record, 'text', '')
+                created_at = getattr(post.record, 'created_at', '')
+                
+                if text and created_at:
+                    dt_utc = pd.to_datetime(created_at, utc=True).replace(tzinfo=None)
+                    clean_text = text.replace('\n', ' ').strip()
+                    valid_posts.append((dt_utc, clean_text))
+                    texts.append(clean_text)
+            
+            if texts:
+                # Added an indicator so you know it hasn't frozen
+                print(f"  -> Processing page {page + 1}/{max_pages} ({len(texts)} posts)...")
+                
+                # Added batch_size=16 to prevent memory/CPU choking
+                sentiments = finbert(texts, batch_size=16)
+                
+                for (dt_utc, clean_text), sent_results in zip(valid_posts, sentiments):
+                    pos = next((x['score'] for x in sent_results if x['label'] == 'positive'), 0)
+                    neg = next((x['score'] for x in sent_results if x['label'] == 'negative'), 0)
+                    sentiment_score = pos - neg
+                    
+                    posts_data.append({
+                        "Ticker": ticker,
+                        "Timestamp": dt_utc,
+                        "Text": clean_text,
+                        "Sentiment": sentiment_score
+                    })
+            
+            cursor = getattr(response, 'cursor', None)
+            if not cursor:
+                print(f"  -> No more pages available for {ticker}.")
+                break
+                
+            time.sleep(1) # Rate limit safety
+            
+        except Exception as e:
+            print(f"  -> Error fetching page {page} for {ticker}: {e}")
             break
             
     if not posts_data:
@@ -113,7 +198,7 @@ def main():
     # 1. Fetch Social Data
     all_posts = []
     for t in tickers:
-        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=50)
+        df_posts = fetch_bluesky_posts(t, limit=100, max_pages=200)
         all_posts.append(df_posts)
         
     social_df = pl.concat(all_posts)
@@ -163,10 +248,18 @@ def main():
     
     # 3. Merge Datasets
     print("Merging datasets using Polars...")
-    # Join the financial data ONTO the social data so we keep every individual post row
-    merged_df = social_df.join(finance_df, on=['Ticker', 'Timestamp'], how='inner')
+    # We left join on Ticker and exact hour to keep weekend/overnight tweets
+    merged_df = social_df.join(finance_df, on=['Ticker', 'Timestamp'], how='left')
     
-    # Handle Null values and outliers using Polars expressions
+    # Sort by Ticker and Timestamp so forward_fill correctly pulls Friday's close for Saturday's tweets
+    merged_df = merged_df.sort(['Ticker', 'Timestamp'])
+    
+    # Forward fill then backward fill the financial columns to cover any gaps
+    merged_df = merged_df.with_columns(
+        pl.col(['Open', 'High', 'Low', 'Close', 'Volume']).forward_fill().backward_fill().over('Ticker')
+    )
+    
+    # Drop any rows that still somehow lack finance data or sentiment
     merged_df = merged_df.drop_nulls(subset=['Close', 'Volume', 'Sentiment'])
     merged_df = merged_df.filter(pl.col('Volume') > 0)
     
@@ -181,8 +274,8 @@ def main():
         existing_df = existing_df.with_columns(
             pl.col('Timestamp').str.replace(" UTC", "").str.replace("Z", "").str.to_datetime().dt.replace_time_zone("UTC").dt.truncate("1h").cast(pl.Datetime("us", "UTC"))
         )
-        # Combine and deduplicate
-        merged_df = pl.concat([existing_df, merged_df], how="vertical_relaxed").unique(subset=['Ticker', 'Timestamp'], keep='last')
+        # Combine and deduplicate (Include Text to not drop duplicate timestamps!)
+        merged_df = pl.concat([existing_df, merged_df], how="vertical_relaxed").unique(subset=['Ticker', 'Timestamp', 'Text'], keep='last')
         
     merged_df.write_csv(output_path)
     

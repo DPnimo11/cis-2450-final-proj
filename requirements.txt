@@ -11,3 +11,5 @@ notebook
 jupyter
 atproto
 python-dotenv
+transformers
+torch
