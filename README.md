@@ -23,7 +23,10 @@ This project merges Bluesky social sentiment with Yahoo Finance hourly stock dat
 │   ├── models/
 │   └── tables/
 └── data/
-    └── merged_financial_sentiment_data.csv
+    ├── raw/
+    │   └── merged_financial_sentiment_data.csv
+    └── processed/
+        └── modeling_dataset.csv
 ```
 
 The original `eda_and_modeling.ipynb` is still present as a backup. New work should happen in the `notebooks/` and `src/` structure.
@@ -51,7 +54,7 @@ Then run:
 python data_collection.py
 ```
 
-The collected CSV is stored at `data/merged_financial_sentiment_data.csv`. The data directory is gitignored.
+The collected CSV is stored at `data/raw/merged_financial_sentiment_data.csv`. The data directory is gitignored.
 
 ## Notebook Order
 
@@ -64,7 +67,7 @@ The collected CSV is stored at `data/merged_financial_sentiment_data.csv`. The d
    - Reproduces the current baseline target.
    - Filters to reliable Yahoo Finance hourly coverage starting `2024-06-01`.
    - Aggregates post-level data to one row per ticker-hour.
-   - Saves the clean modeling input to `outputs/tables/modeling_dataset.csv`.
+   - Saves the clean modeling input to `data/processed/modeling_dataset.csv`.
 
 3. `notebooks/03_modeling_and_results.ipynb`
    - Reproduces the current Logistic Regression baseline.

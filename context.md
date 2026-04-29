@@ -6,9 +6,9 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 ## Current state
 - **Data collection (`data_collection.py`)**: Fully functional and running. Scrapes Bluesky via `atproto`, scores sentiment with ProsusAI/FinBERT, fetches hourly Yahoo Finance data, performs a left join on `(Ticker, Timestamp)`, forward/backward fills financial columns for off-market hours, and appends to a growing CSV. The current dataset has **~194,891 rows** (well above the 50k requirement).
 - **Notebook organization**: The old combined `eda_and_modeling.ipynb` is still present as a backup. New work has been split into `notebooks/01_data_audit_and_eda.ipynb`, `notebooks/02_feature_engineering.ipynb`, and `notebooks/03_modeling_and_results.ipynb`, with shared helper functions in `src/`.
-- **Step 1 clean modeling input**: `outputs/tables/modeling_dataset.csv` has been generated from the raw CSV. It filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and contains **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
+- **Step 1 clean modeling input**: `data/processed/modeling_dataset.csv` has been generated from the raw CSV. It filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and contains **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
 - **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The baseline achieves ~0.74 ROC-AUC but only ~40% accuracy due to severe class imbalance. **No advanced models, SMOTE, hyperparameter tuning, final feature engineering, or dashboard have been implemented yet.**
-- **Data is stored** in `data/merged_financial_sentiment_data.csv` (~60MB, gitignored).
+- **Raw data is stored** in `data/raw/merged_financial_sentiment_data.csv` (~60MB, gitignored). Processed modeling data is stored in `data/processed/`.
 
 ## Codebase map
 - `data_collection.py` — Main data pipeline: scrapes Bluesky, runs FinBERT, fetches Yahoo Finance, merges, deduplicates, and saves CSV.
@@ -17,9 +17,9 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - `notebooks/02_feature_engineering.ipynb` — Current baseline target construction plus ticker-hour aggregation scaffold.
 - `notebooks/03_modeling_and_results.ipynb` — Current baseline Logistic Regression workflow and evaluation scaffold.
 - `src/` — Shared helper modules for config, data loading, feature engineering, modeling, evaluation, and plotting.
-- `outputs/` — Generated figures, tables, and model artifacts for dashboard/presentation reuse.
-- `outputs/tables/modeling_dataset.csv` — Step 1 clean targetless modeling input (gitignored CSV artifact, ~12MB).
-- `data/merged_financial_sentiment_data.csv` — The merged dataset (gitignored, ~194k rows).
+- `outputs/` — Generated figures, model artifacts, and report tables for dashboard/presentation reuse.
+- `data/raw/merged_financial_sentiment_data.csv` — The raw merged dataset from data collection (gitignored, ~194k rows).
+- `data/processed/modeling_dataset.csv` — Step 1 clean targetless modeling input (gitignored CSV artifact, ~12MB).
 - `.env` — Bluesky credentials (`BLUESKY_HANDLE`, `BLUESKY_PASSWORD`). **Do NOT commit.**
 - `requirements.txt` — Python dependencies (pandas, polars, yfinance, atproto, transformers, torch, scikit-learn, etc.).
 - `venv/` — Python 3.13 virtual environment (gitignored).
@@ -97,13 +97,14 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - Old commented-out version of `fetch_bluesky_posts` is still in `data_collection.py` wrapped in triple quotes.
 - Added progress printing during Bluesky scraping (page-by-page indicators).
 - Split the old combined notebook into rubric-aligned notebooks and added reusable `src/` helper modules.
-- Completed Step 1 clean modeling input: valid finance-window filtering plus ticker-hour aggregation saved to `outputs/tables/modeling_dataset.csv`.
+- Completed Step 1 clean modeling input: valid finance-window filtering plus ticker-hour aggregation saved to `data/processed/modeling_dataset.csv`.
+- Reorganized local CSV artifacts: raw collection output now lives under `data/raw/`, processed modeling input under `data/processed/`, and `outputs/` is reserved for figures, models, and report tables.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
 
 1. **Fix target variable / class imbalance** (CRITICAL):
-   - Step 1 is complete: use `outputs/tables/modeling_dataset.csv` as the clean ticker-hour input.
+   - Step 1 is complete: use `data/processed/modeling_dataset.csv` as the clean ticker-hour input.
    - Implement the **Hybrid Model** strategy in the notebook:
      - *Overnight*: Aggregate all sentiment from 4 PM to 9:30 AM into one row → predict the "morning gap" (Next Open - Previous Close).
      - *Intraday*: Pool all posts within each hour into one row → use sentiment at hour `t` to predict return at hour `t+1`.

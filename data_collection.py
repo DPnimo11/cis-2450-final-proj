@@ -264,8 +264,8 @@ def main():
     merged_df = merged_df.filter(pl.col('Volume') > 0)
     
     # Save & Append logic to slowly build to 50,000 threshold over multiple cron runs
-    os.makedirs("data", exist_ok=True)
-    output_path = os.path.join("data", "merged_financial_sentiment_data.csv")
+    os.makedirs(os.path.join("data", "raw"), exist_ok=True)
+    output_path = os.path.join("data", "raw", "merged_financial_sentiment_data.csv")
     
     if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         print("Found existing dataset. Appending and dropping duplicates...")
