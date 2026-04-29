@@ -170,7 +170,7 @@ def update_eda_charts(selected_ticker):
         x="Sentiment_Mean", 
         y="Volume", 
         color="Ticker" if selected_ticker == "ALL" else None, 
-        alpha=0.6,
+        opacity=0.6,
         log_y=True,
         title=f"Hourly Volume vs. Sentiment ({selected_ticker})"
     )
@@ -202,7 +202,7 @@ def update_timeline_chart(selected_ticker):
     )
     
     fig.add_trace(
-        go.Bar(x=pdf["Timestamp"], y=pdf["Sentiment_Mean"], name="Avg Sentiment", marker_color="#3498db", opacity=0.5),
+        go.Bar(x=pdf["Timestamp"], y=pdf["Sentiment_Mean"], name="Avg Sentiment", marker_color="#3498db", opacity=0.85),
         secondary_y=True,
     )
     
