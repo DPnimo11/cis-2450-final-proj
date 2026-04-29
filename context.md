@@ -6,6 +6,7 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 ## Current state
 - **Data collection (`data_collection.py`)**: Fully functional and running. Scrapes Bluesky via `atproto`, scores sentiment with ProsusAI/FinBERT, fetches hourly Yahoo Finance data, performs a left join on `(Ticker, Timestamp)`, forward/backward fills financial columns for off-market hours, and appends to a growing CSV. The current dataset has **~194,891 rows** (well above the 50k requirement).
 - **Notebook organization**: The old combined `eda_and_modeling.ipynb` is still present as a backup. New work has been split into `notebooks/01_data_audit_and_eda.ipynb`, `notebooks/02_feature_engineering.ipynb`, and `notebooks/03_modeling_and_results.ipynb`, with shared helper functions in `src/`.
+- **EDA polish state**: `notebooks/01_data_audit_and_eda.ipynb` now has a presentation-facing narrative, clean markdown takeaways, and six saved figures under `outputs/figures/`.
 - **Step 1 clean modeling input**: The feature-engineering notebook filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and validates **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
 - **Step 2 hybrid target dataset**: The feature-engineering notebook builds a hybrid intraday/overnight target with a tunable **0.1% return threshold**, drops tiny neutral moves, and validates **13,325 labeled rows**: intraday down/up = **4,995 / 5,001**, overnight down/up = **1,587 / 1,742**.
 - **Step 3 final feature dataset**: `data/processed/feature_dataset.csv` is the only processed CSV artifact kept for modeling. It contains **13,325 rows**, **70 columns**, **0 nulls**, and includes lag returns, volume anomaly, sentiment EMA/z-score, post-count anomaly, time features, target-type flags, and ticker indicators.
@@ -16,11 +17,12 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 ## Codebase map
 - `data_collection.py` — Main data pipeline: scrapes Bluesky, runs FinBERT, fetches Yahoo Finance, merges, deduplicates, and saves CSV.
 - `eda_and_modeling.ipynb` — Original combined notebook, kept as a backup while the split notebooks are developed.
-- `notebooks/01_data_audit_and_eda.ipynb` — Dataset audit, null checks, ticker counts, timestamp coverage, and current EDA visuals.
+- `notebooks/01_data_audit_and_eda.ipynb` — Dataset audit, null checks, ticker counts, timestamp coverage, target balance, sentiment-vs-target diagnostics, example ticker timeline, and saved slide-ready EDA visuals.
 - `notebooks/02_feature_engineering.ipynb` — Current baseline target construction plus ticker-hour aggregation scaffold.
 - `notebooks/03_modeling_and_results.ipynb` — Final modeling workflow with combined/split model scopes, resampling comparison, tuning, metrics, confusion matrices, feature importance where available, and saved model artifacts.
 - `src/` — Shared helper modules for config, data loading, feature engineering, modeling, evaluation, and plotting.
 - `outputs/` — Generated figures, model artifacts, and report tables for dashboard/presentation reuse.
+- `outputs/figures/eda_01_ticker_coverage.png` through `eda_06_example_ticker_timeline.png` — Slide-ready EDA visuals from notebook 01.
 - `outputs/tables/model_base_comparison.csv` — Base model/resampling comparison.
 - `outputs/tables/model_tuned_comparison.csv` — Tuned tree-model comparison.
 - `outputs/tables/model_final_summary.csv` — Final selected test metrics by modeling scope.
@@ -113,6 +115,7 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - Completed Step 2 hybrid target construction with tunable thresholding and intraday/overnight target types.
 - Completed Step 3 final feature dataset saved to `data/processed/feature_dataset.csv`; superseded intermediate processed CSVs were removed.
 - Completed Step 4 modeling: combined plus split models, resampling strategy comparison, RandomizedSearchCV tuning, evaluation metrics, final summary tables, and saved model artifacts.
+- Completed EDA polish: notebook 01 now runs cleanly and saves six presentation-ready figures in `outputs/figures/`.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
@@ -134,13 +137,14 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
    - Evaluation includes Precision, Recall, F1, ROC-AUC, PR-AUC, and confusion matrices.
    - Feature importance is shown for selected Random Forest models where available.
 
-4. **EDA polish**:
-   - Need 3–5 excellent, well-formatted charts with markdown explanations for the presentation.
-   - Consider using **Plotly** for interactive charts (bonus course topic).
+4. **EDA polish** (DONE in notebook 01):
+   - Added a presentation-facing story with data audit, ticker coverage, sentiment distribution, monthly activity, target balance, sentiment-vs-target signal check, and example ticker timeline.
+   - Saved reusable chart files to `outputs/figures/`.
 
 5. **Dashboard**:
-   - Build an interactive **Streamlit or Dash** dashboard.
-   - Snapshot best model weights with `joblib` or `pickle` to load without retraining.
+   - Partner is handling the interactive dashboard.
+   - Handoff note: current dashboard code should load `data/processed/feature_dataset.csv`, not old `modeling_dataset.csv` paths.
+   - Saved model artifacts already exist in `outputs/models/` for loading without retraining.
 
 6. **Presentation**:
    - 8–10 min recorded presentation (slides, no code, all members speak).
