@@ -5,12 +5,18 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 
 ## Current state
 - **Data collection (`data_collection.py`)**: Fully functional and running. Scrapes Bluesky via `atproto`, scores sentiment with ProsusAI/FinBERT, fetches hourly Yahoo Finance data, performs a left join on `(Ticker, Timestamp)`, forward/backward fills financial columns for off-market hours, and appends to a growing CSV. The current dataset has **~194,891 rows** (well above the 50k requirement).
-- **EDA & Modeling (`eda_and_modeling.ipynb`)**: Contains initial EDA (summary stats, null checks, ticker value counts, sentiment distribution histogram, volume distribution histogram) and a **baseline Logistic Regression** model with `class_weight='balanced'`. The baseline achieves ~0.74 ROC-AUC but only ~40% accuracy due to severe class imbalance (only ~5% of rows are "Up"). **No advanced models, feature engineering, SMOTE, hyperparameter tuning, or dashboard have been implemented yet.**
+- **Notebook organization**: The old combined `eda_and_modeling.ipynb` is still present as a backup. New work has been split into `notebooks/01_data_audit_and_eda.ipynb`, `notebooks/02_feature_engineering.ipynb`, and `notebooks/03_modeling_and_results.ipynb`, with shared helper functions in `src/`.
+- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The baseline achieves ~0.74 ROC-AUC but only ~40% accuracy due to severe class imbalance. **No advanced models, SMOTE, hyperparameter tuning, final feature engineering, or dashboard have been implemented yet.**
 - **Data is stored** in `data/merged_financial_sentiment_data.csv` (~60MB, gitignored).
 
 ## Codebase map
 - `data_collection.py` — Main data pipeline: scrapes Bluesky, runs FinBERT, fetches Yahoo Finance, merges, deduplicates, and saves CSV.
-- `eda_and_modeling.ipynb` — Jupyter notebook for EDA, feature engineering, and modeling (WIP).
+- `eda_and_modeling.ipynb` — Original combined notebook, kept as a backup while the split notebooks are developed.
+- `notebooks/01_data_audit_and_eda.ipynb` — Dataset audit, null checks, ticker counts, timestamp coverage, and current EDA visuals.
+- `notebooks/02_feature_engineering.ipynb` — Current baseline target construction plus ticker-hour aggregation scaffold.
+- `notebooks/03_modeling_and_results.ipynb` — Current baseline Logistic Regression workflow and evaluation scaffold.
+- `src/` — Shared helper modules for config, data loading, feature engineering, modeling, evaluation, and plotting.
+- `outputs/` — Generated figures, tables, and model artifacts for dashboard/presentation reuse.
 - `data/merged_financial_sentiment_data.csv` — The merged dataset (gitignored, ~194k rows).
 - `.env` — Bluesky credentials (`BLUESKY_HANDLE`, `BLUESKY_PASSWORD`). **Do NOT commit.**
 - `requirements.txt` — Python dependencies (pandas, polars, yfinance, atproto, transformers, torch, scikit-learn, etc.).
@@ -32,8 +38,10 @@ pip install -r requirements.txt
 # Data collection (requires .env with Bluesky creds, GPU recommended for FinBERT)
 python data_collection.py
 
-# EDA & Modeling
-jupyter notebook eda_and_modeling.ipynb
+# EDA, feature engineering, and modeling
+jupyter notebook notebooks/01_data_audit_and_eda.ipynb
+jupyter notebook notebooks/02_feature_engineering.ipynb
+jupyter notebook notebooks/03_modeling_and_results.ipynb
 ```
 
 ## Architecture notes
@@ -84,8 +92,9 @@ jupyter notebook eda_and_modeling.ipynb
 - Added **GPU detection** and batch processing (`batch_size=16`) for FinBERT inference.
 - Expanded ticker list from a few to **23 tickers**.
 - Changed merge strategy to **left join + forward fill** to preserve posts outside trading hours (previously an inner join was dropping overnight data).
-- Removed old commented-out version of `fetch_bluesky_posts` (still in file but wrapped in `"""`).
+- Old commented-out version of `fetch_bluesky_posts` is still in `data_collection.py` wrapped in triple quotes.
 - Added progress printing during Bluesky scraping (page-by-page indicators).
+- Split the old combined notebook into rubric-aligned notebooks and added reusable `src/` helper modules.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
@@ -136,4 +145,3 @@ jupyter notebook eda_and_modeling.ipynb
 - **The old fetch function** is still in `data_collection.py` wrapped in triple quotes (lines 31–95). It's dead code — can be cleaned up.
 - **`requirements.txt`** still lists `nltk` from the old VADER approach. It's not used anymore but won't hurt.
 - **The notebook uses Polars for loading/wrangling** but casts to Pandas for seaborn/matplotlib plots and for scikit-learn. This is expected.
-- **Working branch is `darren`**, not `main`.

@@ -1,12 +1,80 @@
-# updates
-- switched to finbert w/ gpu
-- more tickers
-- change to left join and forward fill to get posts outside of trading hours
+# CIS 2450 Final Project
 
-# stuff to implement
+This project merges Bluesky social sentiment with Yahoo Finance hourly stock data to study whether social sentiment helps predict short-term stock price movement.
 
-Hybrid Model (to fix class imbalance):
-The Overnight Model (Strategy 1): Aggregate all sentiment from 4:00 PM to 9:30 AM. Use this to predict the Overnight Return (Open price at 9:30 AM minus Close price at 4:00 PM the previous day).
-The Intraday Model (Strategy 2): For hours between 9:30 AM and 4:00 PM, use the sentiment at hour $t$ to predict the return at hour $t+1$. (maybe try ema or rolling average or smth, also pool within hour)
+## Repository Structure
 
-maybe address neutral signals w/ z-scores or bull index
+```text
+.
+├── data_collection.py
+├── notebooks/
+│   ├── 01_data_audit_and_eda.ipynb
+│   ├── 02_feature_engineering.ipynb
+│   └── 03_modeling_and_results.ipynb
+├── src/
+│   ├── config.py
+│   ├── data_loading.py
+│   ├── feature_engineering.py
+│   ├── modeling.py
+│   ├── evaluation.py
+│   └── plots.py
+├── outputs/
+│   ├── figures/
+│   ├── models/
+│   └── tables/
+└── data/
+    └── merged_financial_sentiment_data.csv
+```
+
+The original `eda_and_modeling.ipynb` is still present as a backup. New work should happen in the `notebooks/` and `src/` structure.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Data Collection
+
+Create a `.env` file with Bluesky credentials before running collection:
+
+```text
+BLUESKY_HANDLE=your-handle.bsky.social
+BLUESKY_PASSWORD=your-app-password
+```
+
+Then run:
+
+```bash
+python data_collection.py
+```
+
+The collected CSV is stored at `data/merged_financial_sentiment_data.csv`. The data directory is gitignored.
+
+## Notebook Order
+
+1. `notebooks/01_data_audit_and_eda.ipynb`
+   - Loads the merged dataset.
+   - Checks shape, nulls, ticker balance, duplicates, and timestamp coverage.
+   - Produces the current EDA visuals.
+
+2. `notebooks/02_feature_engineering.ipynb`
+   - Reproduces the current baseline target.
+   - Aggregates post-level data to ticker-hour rows.
+   - Saves an intermediate hourly modeling table to `outputs/tables/`.
+
+3. `notebooks/03_modeling_and_results.ipynb`
+   - Reproduces the current Logistic Regression baseline.
+   - Uses chronological train/test split and train-only scaling.
+   - Leaves space for the final model comparison and tuning work.
+
+## Current Highest-Priority Work
+
+- Replace the post-level target with the cleaned hourly/hybrid target.
+- Filter timestamps to valid Yahoo Finance hourly coverage.
+- Add feature engineering: lag returns, volume anomaly, sentiment EMA/z-score, hour/day features, and ticker encoding.
+- Train and tune at least three models: Logistic Regression, Random Forest, and a boosting model.
+- Build the required interactive dashboard.
+- Prepare the 8-10 minute final presentation and slide PDF.
