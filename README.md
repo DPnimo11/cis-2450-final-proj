@@ -62,8 +62,9 @@ The collected CSV is stored at `data/merged_financial_sentiment_data.csv`. The d
 
 2. `notebooks/02_feature_engineering.ipynb`
    - Reproduces the current baseline target.
-   - Aggregates post-level data to ticker-hour rows.
-   - Saves an intermediate hourly modeling table to `outputs/tables/`.
+   - Filters to reliable Yahoo Finance hourly coverage starting `2024-06-01`.
+   - Aggregates post-level data to one row per ticker-hour.
+   - Saves the clean modeling input to `outputs/tables/modeling_dataset.csv`.
 
 3. `notebooks/03_modeling_and_results.ipynb`
    - Reproduces the current Logistic Regression baseline.
@@ -72,8 +73,8 @@ The collected CSV is stored at `data/merged_financial_sentiment_data.csv`. The d
 
 ## Current Highest-Priority Work
 
-- Replace the post-level target with the cleaned hourly/hybrid target.
-- Filter timestamps to valid Yahoo Finance hourly coverage.
+- Step 1 complete: clean ticker-hour modeling input has `54,572` rows, `23` tickers, no nulls, and no duplicate ticker-hour keys.
+- Replace the targetless modeling input with the cleaned hourly/hybrid target.
 - Add feature engineering: lag returns, volume anomaly, sentiment EMA/z-score, hour/day features, and ticker encoding.
 - Train and tune at least three models: Logistic Regression, Random Forest, and a boosting model.
 - Build the required interactive dashboard.
