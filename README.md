@@ -26,7 +26,8 @@ This project merges Bluesky social sentiment with Yahoo Finance hourly stock dat
     ├── raw/
     │   └── merged_financial_sentiment_data.csv
     └── processed/
-        └── modeling_dataset.csv
+        ├── modeling_dataset.csv
+        └── hybrid_target_dataset.csv
 ```
 
 The original `eda_and_modeling.ipynb` is still present as a backup. New work should happen in the `notebooks/` and `src/` structure.
@@ -68,16 +69,17 @@ The collected CSV is stored at `data/raw/merged_financial_sentiment_data.csv`. T
    - Filters to reliable Yahoo Finance hourly coverage starting `2024-06-01`.
    - Aggregates post-level data to one row per ticker-hour.
    - Saves the clean modeling input to `data/processed/modeling_dataset.csv`.
+   - Builds the hybrid intraday/overnight target and saves it to `data/processed/hybrid_target_dataset.csv`.
 
 3. `notebooks/03_modeling_and_results.ipynb`
-   - Reproduces the current Logistic Regression baseline.
+   - Should now load `data/processed/hybrid_target_dataset.csv`.
    - Uses chronological train/test split and train-only scaling.
-   - Leaves space for the final model comparison and tuning work.
+   - Leaves space for the final feature set, model comparison, and tuning work.
 
 ## Current Highest-Priority Work
 
 - Step 1 complete: clean ticker-hour modeling input has `54,572` rows, `23` tickers, no nulls, and no duplicate ticker-hour keys.
-- Replace the targetless modeling input with the cleaned hourly/hybrid target.
+- Step 2 complete: hybrid target dataset has `13,325` labeled rows with a tunable `0.1%` return threshold.
 - Add feature engineering: lag returns, volume anomaly, sentiment EMA/z-score, hour/day features, and ticker encoding.
 - Train and tune at least three models: Logistic Regression, Random Forest, and a boosting model.
 - Build the required interactive dashboard.

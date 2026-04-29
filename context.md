@@ -7,7 +7,8 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - **Data collection (`data_collection.py`)**: Fully functional and running. Scrapes Bluesky via `atproto`, scores sentiment with ProsusAI/FinBERT, fetches hourly Yahoo Finance data, performs a left join on `(Ticker, Timestamp)`, forward/backward fills financial columns for off-market hours, and appends to a growing CSV. The current dataset has **~194,891 rows** (well above the 50k requirement).
 - **Notebook organization**: The old combined `eda_and_modeling.ipynb` is still present as a backup. New work has been split into `notebooks/01_data_audit_and_eda.ipynb`, `notebooks/02_feature_engineering.ipynb`, and `notebooks/03_modeling_and_results.ipynb`, with shared helper functions in `src/`.
 - **Step 1 clean modeling input**: `data/processed/modeling_dataset.csv` has been generated from the raw CSV. It filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and contains **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
-- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The baseline achieves ~0.74 ROC-AUC but only ~40% accuracy due to severe class imbalance. **No advanced models, SMOTE, hyperparameter tuning, final feature engineering, or dashboard have been implemented yet.**
+- **Step 2 hybrid target dataset**: `data/processed/hybrid_target_dataset.csv` has been generated from the clean ticker-hour data. It uses a tunable **0.1% return threshold**, drops tiny neutral moves, and contains **13,325 labeled rows**: intraday down/up = **4,995 / 5,001**, overnight down/up = **1,587 / 1,742**.
+- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The final modeling notebook still needs to be updated to use the hybrid target dataset. **No advanced models, SMOTE, hyperparameter tuning, final feature engineering, or dashboard have been implemented yet.**
 - **Raw data is stored** in `data/raw/merged_financial_sentiment_data.csv` (~60MB, gitignored). Processed modeling data is stored in `data/processed/`.
 
 ## Codebase map
@@ -20,6 +21,7 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - `outputs/` — Generated figures, model artifacts, and report tables for dashboard/presentation reuse.
 - `data/raw/merged_financial_sentiment_data.csv` — The raw merged dataset from data collection (gitignored, ~194k rows).
 - `data/processed/modeling_dataset.csv` — Step 1 clean targetless modeling input (gitignored CSV artifact, ~12MB).
+- `data/processed/hybrid_target_dataset.csv` — Step 2 target-bearing hybrid intraday/overnight dataset (gitignored CSV artifact, ~5.5MB).
 - `.env` — Bluesky credentials (`BLUESKY_HANDLE`, `BLUESKY_PASSWORD`). **Do NOT commit.**
 - `requirements.txt` — Python dependencies (pandas, polars, yfinance, atproto, transformers, torch, scikit-learn, etc.).
 - `venv/` — Python 3.13 virtual environment (gitignored).
@@ -54,7 +56,10 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 3. **Merge**: Left join `social_df` onto `finance_df` on `(Ticker, Timestamp)`. This keeps all posts including off-market/weekend ones.
 4. **Gap handling**: Financial columns (`Open`, `High`, `Low`, `Close`, `Volume`) are forward-filled then backward-filled per ticker so that overnight/weekend posts inherit the last known market values.
 5. **Deduplication**: On append, existing CSV is loaded and combined with new data; duplicates are removed on `(Ticker, Timestamp, Text)` keeping the latest.
-6. **Target variable**: The current baseline target is binary — `1` if the next close for the same ticker is above the current close, `0` otherwise. This target is still flawed and will be replaced in the feature-engineering notebook.
+6. **Target variable**: The final target dataset now uses a hybrid strategy:
+   - Intraday rows use regular-session sentiment at hour `t` to predict the next observed same-day market bar.
+   - Overnight rows aggregate off-market sentiment before the next observed market open and predict the gap from the previous observed market close to that open.
+   - The direction target is thresholded: `1` for returns above `+0.1%`, `0` for returns below `-0.1%`, and tiny neutral moves are dropped.
 
 ### Key libraries
 - **Polars** (not Pandas) — used throughout for data wrangling (course requirement).
@@ -99,16 +104,15 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - Split the old combined notebook into rubric-aligned notebooks and added reusable `src/` helper modules.
 - Completed Step 1 clean modeling input: valid finance-window filtering plus ticker-hour aggregation saved to `data/processed/modeling_dataset.csv`.
 - Reorganized local CSV artifacts: raw collection output now lives under `data/raw/`, processed modeling input under `data/processed/`, and `outputs/` is reserved for figures, models, and report tables.
+- Completed Step 2 hybrid target dataset with tunable thresholding and intraday/overnight target types saved to `data/processed/hybrid_target_dataset.csv`.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
 
 1. **Fix target variable / class imbalance** (CRITICAL):
    - Step 1 is complete: use `data/processed/modeling_dataset.csv` as the clean ticker-hour input.
-   - Implement the **Hybrid Model** strategy in the notebook:
-     - *Overnight*: Aggregate all sentiment from 4 PM to 9:30 AM into one row → predict the "morning gap" (Next Open - Previous Close).
-     - *Intraday*: Pool all posts within each hour into one row → use sentiment at hour `t` to predict return at hour `t+1`.
-   - This eliminates the flood of flat/down rows from off-market hours.
+   - Step 2 is complete: use `data/processed/hybrid_target_dataset.csv` as the target-bearing modeling input.
+   - The hybrid target substantially improves the class balance versus the old post-level target.
 
 2. **Feature engineering** (in notebook, NOT in data_collection.py):
    - Resample sentiment to a continuous hourly timeline (fill missing hours with 0).
