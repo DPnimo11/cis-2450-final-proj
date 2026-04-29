@@ -13,3 +13,5 @@ atproto
 python-dotenv
 transformers
 torch
+dash
+plotly
