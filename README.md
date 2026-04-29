@@ -71,15 +71,17 @@ The collected CSV is stored at `data/raw/merged_financial_sentiment_data.csv`. T
    - Adds final modeling features and saves only `data/processed/feature_dataset.csv`.
 
 3. `notebooks/03_modeling_and_results.ipynb`
-   - Should now load `data/processed/feature_dataset.csv`.
+   - Loads `data/processed/feature_dataset.csv`.
    - Uses chronological train/test split and train-only scaling.
-   - Leaves space for the final feature set, model comparison, and tuning work.
+   - Compares combined, intraday-only, and overnight-only models.
+   - Compares no resampling, random upsampling, and SMOTE.
+   - Saves result tables to `outputs/tables/` and selected models to `outputs/models/`.
 
 ## Current Highest-Priority Work
 
 - Step 1 complete: clean ticker-hour modeling input has `54,572` rows, `23` tickers, no nulls, and no duplicate ticker-hour keys.
 - Step 2 complete: hybrid target dataset has `13,325` labeled rows with a tunable `0.1%` return threshold.
 - Step 3 complete: final feature dataset has `13,325` rows and `70` columns.
-- Train and tune at least three models: Logistic Regression, Random Forest, and a boosting model.
+- Step 4 complete: Logistic Regression, Random Forest, and Histogram Gradient Boosting have been trained/tuned across combined and split target scopes.
 - Build the required interactive dashboard.
 - Prepare the 8-10 minute final presentation and slide PDF.

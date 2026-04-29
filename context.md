@@ -9,7 +9,8 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - **Step 1 clean modeling input**: The feature-engineering notebook filters to timestamps on/after **2024-06-01**, aggregates posts to one row per `(Ticker, Timestamp)`, and validates **54,572 ticker-hour rows**, **23 tickers**, **0 nulls**, and **0 duplicate ticker-hour keys**.
 - **Step 2 hybrid target dataset**: The feature-engineering notebook builds a hybrid intraday/overnight target with a tunable **0.1% return threshold**, drops tiny neutral moves, and validates **13,325 labeled rows**: intraday down/up = **4,995 / 5,001**, overnight down/up = **1,587 / 1,742**.
 - **Step 3 final feature dataset**: `data/processed/feature_dataset.csv` is the only processed CSV artifact kept for modeling. It contains **13,325 rows**, **70 columns**, **0 nulls**, and includes lag returns, volume anomaly, sentiment EMA/z-score, post-count anomaly, time features, target-type flags, and ticker indicators.
-- **Current modeling state**: The split notebooks preserve the initial EDA and **baseline Logistic Regression** model with `class_weight='balanced'`. The final modeling notebook still needs to be updated to use `data/processed/feature_dataset.csv`. **No advanced models, SMOTE, hyperparameter tuning, or dashboard have been implemented yet.**
+- **Step 4 modeling state**: `notebooks/03_modeling_and_results.ipynb` now uses `data/processed/feature_dataset.csv`, compares combined/intraday/overnight scopes, compares no resampling/random upsampling/SMOTE, trains Logistic Regression, Random Forest, and Histogram Gradient Boosting, tunes the two tree-based models with `RandomizedSearchCV`, and saves result tables plus selected model artifacts.
+- **Best current test results**: combined model F1 **0.609**, intraday-only F1 **0.562**, overnight-only F1 **0.611**. ROC-AUC remains close to **0.50-0.53**, so the honest conclusion should be that sentiment features produce limited directional signal in this sample.
 - **Raw data is stored** in `data/raw/merged_financial_sentiment_data.csv` (~60MB, gitignored). Processed modeling data is stored in `data/processed/`.
 
 ## Codebase map
@@ -17,9 +18,13 @@ A CIS 2450 (Big Data Analytics) final project that merges **Bluesky social media
 - `eda_and_modeling.ipynb` — Original combined notebook, kept as a backup while the split notebooks are developed.
 - `notebooks/01_data_audit_and_eda.ipynb` — Dataset audit, null checks, ticker counts, timestamp coverage, and current EDA visuals.
 - `notebooks/02_feature_engineering.ipynb` — Current baseline target construction plus ticker-hour aggregation scaffold.
-- `notebooks/03_modeling_and_results.ipynb` — Current baseline Logistic Regression workflow and evaluation scaffold.
+- `notebooks/03_modeling_and_results.ipynb` — Final modeling workflow with combined/split model scopes, resampling comparison, tuning, metrics, confusion matrices, feature importance where available, and saved model artifacts.
 - `src/` — Shared helper modules for config, data loading, feature engineering, modeling, evaluation, and plotting.
 - `outputs/` — Generated figures, model artifacts, and report tables for dashboard/presentation reuse.
+- `outputs/tables/model_base_comparison.csv` — Base model/resampling comparison.
+- `outputs/tables/model_tuned_comparison.csv` — Tuned tree-model comparison.
+- `outputs/tables/model_final_summary.csv` — Final selected test metrics by modeling scope.
+- `outputs/models/best_*_model.joblib` — Selected model artifacts for dashboard use.
 - `data/raw/merged_financial_sentiment_data.csv` — The raw merged dataset from data collection (gitignored, ~194k rows).
 - `data/processed/feature_dataset.csv` — Final processed modeling dataset (gitignored CSV artifact, ~10MB).
 - `.env` — Bluesky credentials (`BLUESKY_HANDLE`, `BLUESKY_PASSWORD`). **Do NOT commit.**
@@ -64,7 +69,8 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 ### Key libraries
 - **Polars** (not Pandas) — used throughout for data wrangling (course requirement).
 - **ProsusAI/FinBERT** via HuggingFace `transformers.pipeline` — sentiment analysis, GPU-accelerated with `torch.cuda`.
-- **scikit-learn** — modeling (LogisticRegression baseline so far, StandardScaler).
+- **scikit-learn** — modeling, scaling, RandomizedSearchCV, Logistic Regression, Random Forest, Histogram Gradient Boosting.
+- **imbalanced-learn** — SMOTE comparison after train split.
 - **matplotlib / seaborn** — EDA visualizations.
 - **yfinance** — hourly stock data.
 - **atproto** — Bluesky API client.
@@ -80,11 +86,11 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - **Old baseline target was flawed**: The original post-level baseline target created severe class imbalance and overweighted high-post hours. This is now addressed in `notebooks/02_feature_engineering.ipynb` with ticker-hour aggregation and a hybrid intraday/overnight target.
 - **Neutral sentiment dominance**: Even with FinBERT, the vast majority of sentiment scores cluster near zero (neutral). Raw sentiment alone is a weak predictor.
 - **Raw data collection preserves one row per post** (not one row per hour). This is still true in raw data, but final modeling now uses aggregated ticker-hour and hybrid target rows.
-- **Modeling notebook still needs replacement**: `notebooks/03_modeling_and_results.ipynb` still reflects the old baseline workflow and must be updated to load `data/processed/feature_dataset.csv`.
+- **Predictive signal is modest**: The current best models beat naive presentation metrics like recall/F1 in some scopes, but ROC-AUC is near random. This is a result to present honestly, not a code bug.
 
 ## Constraints / preferences
 - **Must use Polars** for data wrangling (course topic).
-- **Must apply 6+ course topics** for full marks. Currently covered: Polars, FinBERT (text/LLMs). Still need: supervised learning models (beyond baseline), hyperparameter tuning, time series features, ensemble models, and potentially more.
+- **Must apply 6+ course topics** for full marks. Currently covered: Polars, FinBERT/text modeling, supervised learning, time-series feature engineering, ensemble models, imbalance handling, and hyperparameter tuning.
 - **SMOTE/upsampling/downsampling MUST be applied AFTER train-test split** — doing it before is a rubric penalty (-3 points for data leakage).
 - **Scaling/PCA must also be applied AFTER the split** (fit on train only, transform on test).
 - **Need 3 models minimum**: 1 baseline + 2 more complex (e.g., Random Forest / XGBoost / etc.).
@@ -106,6 +112,7 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
 - Reorganized local CSV artifacts: raw collection output now lives under `data/raw/`, final processed modeling input under `data/processed/`, and `outputs/` is reserved for figures, models, and report tables.
 - Completed Step 2 hybrid target construction with tunable thresholding and intraday/overnight target types.
 - Completed Step 3 final feature dataset saved to `data/processed/feature_dataset.csv`; superseded intermediate processed CSVs were removed.
+- Completed Step 4 modeling: combined plus split models, resampling strategy comparison, RandomizedSearchCV tuning, evaluation metrics, final summary tables, and saved model artifacts.
 
 ## TODO / next work
 **Priority order for completing the project before April 30:**
@@ -119,13 +126,13 @@ jupyter notebook notebooks/03_modeling_and_results.ipynb
    - Added sentiment EMA features, sentiment z-score, bullishness index, post-count anomaly, lag returns, volume anomaly, time features, target-type flags, and ticker indicators.
    - `Target_Return`, `Target_Price`, and other target columns remain in the final CSV for evaluation/explanation but must be excluded from training features.
 
-3. **Modeling pipeline** (in notebook):
-   - Apply **SMOTE** (or up/downsampling) AFTER train-test split.
-   - Scale features AFTER split (fit on train, transform on test).
-   - Train **3 models**: Logistic Regression (baseline), then 2 more (e.g., Random Forest, XGBoost).
-   - **Hyperparameter tuning**: Use Randomized Search or Bayesian Optimization (not just Grid Search).
-   - **Evaluation**: Use Precision, Recall, F1, ROC-AUC (NOT just accuracy — rubric penalty for imbalanced data).
-   - **Feature importance**: Extract and plot from the best tree-based model.
+3. **Modeling pipeline** (DONE in notebook 03):
+   - SMOTE/random upsampling are applied only after the split and only to training data.
+   - Scaling is fit on train only.
+   - Trained Logistic Regression, Random Forest, and Histogram Gradient Boosting.
+   - Tuned tree-based models with RandomizedSearchCV.
+   - Evaluation includes Precision, Recall, F1, ROC-AUC, PR-AUC, and confusion matrices.
+   - Feature importance is shown for selected Random Forest models where available.
 
 4. **EDA polish**:
    - Need 3–5 excellent, well-formatted charts with markdown explanations for the presentation.

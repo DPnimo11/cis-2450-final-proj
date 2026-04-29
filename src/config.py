@@ -28,6 +28,10 @@ ROLLING_FEATURE_WINDOW = 24
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.20
+VALIDATION_SIZE = 0.20
+MODEL_SELECTION_METRIC = "test_f1"
+RESAMPLING_STRATEGIES = ["none", "upsample", "smote"]
+MODEL_SCOPES = ["combined", "intraday", "overnight"]
 
 TICKERS = [
     "$AAPL",
@@ -99,3 +103,6 @@ BASE_MODEL_FEATURES = [
     "Signal_Weekday_Cos",
     "Is_Overnight",
 ]
+
+TARGET_COLUMN = "Target_Direction"
+SCOPE_COLUMN = "Target_Type"

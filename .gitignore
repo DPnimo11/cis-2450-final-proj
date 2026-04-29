@@ -2,6 +2,7 @@
 venv/
 __pycache__/
 *.csv
+!outputs/tables/*.csv
 .ipynb_checkpoints/
 
 .vscode/
