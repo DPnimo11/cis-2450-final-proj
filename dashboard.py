@@ -1,9 +1,10 @@
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, dash_table
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
 import os
+import base64
 
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -36,6 +37,19 @@ def load_data():
 # Load dataset into memory
 df = load_data()
 tickers = df["Ticker"].unique().to_list() if not df.is_empty() else []
+
+# Load model evaluation data
+MODEL_RESULTS_PATH = "outputs/tables/model_final_results.csv"
+if os.path.exists(MODEL_RESULTS_PATH):
+    model_df = pl.read_csv(MODEL_RESULTS_PATH)
+    # Filter for test split only
+    if not model_df.is_empty() and "split" in model_df.columns:
+        test_model_df = model_df.filter(pl.col("split") == "test")
+    else:
+        test_model_df = pl.DataFrame()
+else:
+    model_df = pl.DataFrame()
+    test_model_df = pl.DataFrame()
 
 # --- Layout ---
 
@@ -83,12 +97,41 @@ def render_tab_content(tab):
         return render_explorer_tab()
     return html.Div("Tab not found.")
 
+def b64_image(image_filename):
+    if os.path.exists(image_filename):
+        with open(image_filename, 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode('utf-8')
+        return f'data:image/png;base64,{encoded}'
+    return ""
+
 def render_eda_tab():
     if df.is_empty():
         return html.Div("No data available. Please ensure data collection is complete.")
     
+    # Static EDA Images
+    image_paths = [
+        "outputs/figures/eda_01_ticker_coverage.png",
+        "outputs/figures/eda_02_sentiment_distribution.png",
+        "outputs/figures/eda_03_monthly_activity_sentiment.png",
+        "outputs/figures/eda_04_target_balance.png",
+        "outputs/figures/eda_05_sentiment_vs_target.png",
+        "outputs/figures/eda_06_example_ticker_timeline.png"
+    ]
+    
+    image_divs = []
+    for path in image_paths:
+        src = b64_image(path)
+        if src:
+            image_divs.append(
+                html.Div([
+                    html.Img(src=src, style={"width": "100%", "borderRadius": "8px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"})
+                ], style={"width": "48%", "display": "inline-block", "margin": "1%", "verticalAlign": "top"})
+            )
+    
     return html.Div([
         html.H3("Exploratory Data Analysis", style={"color": "#2c3e50"}),
+        
+        html.H4("Interactive Distributions", style={"color": "#34495e", "marginTop": "20px"}),
         html.Div([
             html.Label("Filter by Ticker:", style={"fontWeight": "bold", "marginRight": "10px"}),
             dcc.Dropdown(
@@ -102,25 +145,52 @@ def render_eda_tab():
         html.Div([
             dcc.Graph(id="eda-sentiment-chart", style={"display": "inline-block", "width": "48%"}),
             dcc.Graph(id="eda-volume-chart", style={"display": "inline-block", "width": "48%", "float": "right"})
-        ])
+        ]),
+        
+        html.Hr(style={"margin": "40px 0", "border": "0", "borderTop": "1px solid #ecf0f1"}),
+        
+        html.H4("Static EDA Reports", style={"color": "#34495e", "marginBottom": "20px"}),
+        html.P("These charts were generated automatically by the feature engineering pipeline.", style={"color": "#7f8c8d"}),
+        html.Div(image_divs, style={"marginTop": "20px", "display": "flex", "flexWrap": "wrap"})
     ])
 
 def render_model_tab():
+    if test_model_df.is_empty():
+        return html.Div("Model evaluation data not available. Please ensure model training is complete.")
+        
+    scopes = test_model_df["scope"].unique().to_list()
+    
     return html.Div([
         html.H3("Model Evaluation", style={"color": "#2c3e50"}),
-        html.P("This section will display performance metrics (Confusion Matrix, ROC-AUC) for the Logistic Regression, Random Forest, and Boosting models once feature engineering is finalized.", style={"color": "#7f8c8d"}),
+        html.P("Compare performance metrics across different scopes and resampling strategies on the test set.", style={"color": "#7f8c8d"}),
+        
+        html.Div([
+            html.Label("Select Scope:", style={"fontWeight": "bold", "marginRight": "10px"}),
+            dcc.Dropdown(
+                id="model-scope-dropdown",
+                options=[{"label": s.capitalize(), "value": s} for s in scopes],
+                value=scopes[0] if scopes else None,
+                style={"width": "200px", "display": "inline-block"}
+            )
+        ], style={"marginBottom": "20px", "display": "flex", "alignItems": "center"}),
+        
+        # Metrics Chart
+        dcc.Graph(id="model-metrics-chart", style={"marginBottom": "30px"}),
+        
+        # Data Table
+        html.Div(id="model-metrics-table-container", style={"marginBottom": "40px"}),
         
         # Placeholders for future charts
         html.Div([
             html.Div(
                 style={"border": "1px dashed #bdc3c7", "borderRadius": "8px", "padding": "50px", "textAlign": "center", "width": "45%", "display": "inline-block", "backgroundColor": "#f9fbfc"},
-                children=[html.H4("Confusion Matrix", style={"color": "#95a5a6"}), html.P("Waiting for model outputs...")]
+                children=[html.H4("Confusion Matrix", style={"color": "#95a5a6"}), html.P("Waiting for teammate's pre-computed CM data...")]
             ),
             html.Div(
                 style={"border": "1px dashed #bdc3c7", "borderRadius": "8px", "padding": "50px", "textAlign": "center", "width": "45%", "display": "inline-block", "float": "right", "backgroundColor": "#f9fbfc"},
-                children=[html.H4("ROC Curve", style={"color": "#95a5a6"}), html.P("Waiting for model outputs...")]
+                children=[html.H4("ROC Curve", style={"color": "#95a5a6"}), html.P("Waiting for teammate's pre-computed ROC data...")]
             )
-        ], style={"marginTop": "20px"})
+        ], style={"marginTop": "20px", "clear": "both"})
     ])
 
 def render_explorer_tab():
@@ -179,6 +249,81 @@ def update_eda_charts(selected_ticker):
         fig_volume.update_traces(marker_color="#e74c3c")
         
     return fig_sentiment, fig_volume
+
+@app.callback(
+    [Output("model-metrics-chart", "figure"),
+     Output("model-metrics-table-container", "children")],
+    Input("model-scope-dropdown", "value")
+)
+def update_model_tab(selected_scope):
+    if not selected_scope or test_model_df.is_empty():
+        return go.Figure(), html.Div()
+        
+    filtered = test_model_df.filter(pl.col("scope") == selected_scope)
+    pdf = filtered.to_pandas()
+    
+    # Format model names for better display
+    pdf["model_display"] = pdf["model"].str.replace("_", " ").str.title() + " (" + pdf["resampling"] + ")"
+    
+    # Sort by F1 score
+    pdf = pdf.sort_values("f1", ascending=False)
+    
+    # Create grouped bar chart
+    fig = go.Figure()
+    
+    metrics = ["f1", "roc_auc", "precision", "recall"]
+    colors = ["#2ecc71", "#3498db", "#9b59b6", "#e74c3c"]
+    
+    for metric, color in zip(metrics, colors):
+        fig.add_trace(go.Bar(
+            x=pdf["model_display"],
+            y=pdf[metric],
+            name=metric.replace("_", " ").title(),
+            marker_color=color
+        ))
+        
+    fig.update_layout(
+        title=f"Test Set Performance Metrics ({selected_scope.capitalize()} Scope)",
+        barmode="group",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis=dict(title="Score", range=[0, 1], gridcolor="#ecf0f1")
+    )
+    
+    # Create Data Table
+    table_cols = [{"name": c.replace("_", " ").title(), "id": c} for c in ["model", "resampling", "precision", "recall", "f1", "roc_auc", "pr_auc"]]
+    
+    # Format numbers to 3 decimal places
+    format_pdf = pdf.copy()
+    for col in ["precision", "recall", "f1", "roc_auc", "pr_auc"]:
+        format_pdf[col] = format_pdf[col].round(3)
+        
+    table = dash_table.DataTable(
+        data=format_pdf.to_dict('records'),
+        columns=table_cols,
+        style_header={
+            'backgroundColor': '#3498db',
+            'color': 'white',
+            'fontWeight': 'bold',
+            'textAlign': 'left'
+        },
+        style_cell={
+            'padding': '10px',
+            'fontFamily': 'Inter, sans-serif',
+            'textAlign': 'left',
+            'border': '1px solid #ecf0f1'
+        },
+        style_data_conditional=[
+            {
+                'if': {'row_index': 'odd'},
+                'backgroundColor': '#f9f9f9'
+            }
+        ],
+        sort_action="native"
+    )
+    
+    return fig, table
 
 @app.callback(
     Output("ticker-timeline-chart", "figure"),
