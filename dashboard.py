@@ -11,7 +11,7 @@ app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "Financial Sentiment Dashboard"
 
 # Load the data
-DATA_PATH = "data/processed/modeling_dataset.csv"
+DATA_PATH = "data/processed/feature_dataset.csv"
 
 def load_data():
     if os.path.exists(DATA_PATH):
@@ -180,15 +180,15 @@ def render_model_tab():
         # Data Table
         html.Div(id="model-metrics-table-container", style={"marginBottom": "40px"}),
         
-        # Placeholders for future charts
+        # Live CM and ROC charts
         html.Div([
             html.Div(
-                style={"border": "1px dashed #bdc3c7", "borderRadius": "8px", "padding": "50px", "textAlign": "center", "width": "45%", "display": "inline-block", "backgroundColor": "#f9fbfc"},
-                children=[html.H4("Confusion Matrix", style={"color": "#95a5a6"}), html.P("Waiting for teammate's pre-computed CM data...")]
+                style={"borderRadius": "8px", "padding": "10px", "textAlign": "center", "width": "48%", "display": "inline-block", "backgroundColor": "#ffffff", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"},
+                children=[dcc.Graph(id="model-cm-chart")]
             ),
             html.Div(
-                style={"border": "1px dashed #bdc3c7", "borderRadius": "8px", "padding": "50px", "textAlign": "center", "width": "45%", "display": "inline-block", "float": "right", "backgroundColor": "#f9fbfc"},
-                children=[html.H4("ROC Curve", style={"color": "#95a5a6"}), html.P("Waiting for teammate's pre-computed ROC data...")]
+                style={"borderRadius": "8px", "padding": "10px", "textAlign": "center", "width": "48%", "display": "inline-block", "float": "right", "backgroundColor": "#ffffff", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"},
+                children=[dcc.Graph(id="model-roc-chart")]
             )
         ], style={"marginTop": "20px", "clear": "both"})
     ])
@@ -252,12 +252,14 @@ def update_eda_charts(selected_ticker):
 
 @app.callback(
     [Output("model-metrics-chart", "figure"),
-     Output("model-metrics-table-container", "children")],
+     Output("model-metrics-table-container", "children"),
+     Output("model-cm-chart", "figure"),
+     Output("model-roc-chart", "figure")],
     Input("model-scope-dropdown", "value")
 )
 def update_model_tab(selected_scope):
     if not selected_scope or test_model_df.is_empty():
-        return go.Figure(), html.Div()
+        return go.Figure(), html.Div(), go.Figure(), go.Figure()
         
     filtered = test_model_df.filter(pl.col("scope") == selected_scope)
     pdf = filtered.to_pandas()
@@ -323,7 +325,83 @@ def update_model_tab(selected_scope):
         sort_action="native"
     )
     
-    return fig, table
+    # Live Inference for CM and ROC
+    cm_fig = go.Figure()
+    roc_fig = go.Figure()
+    
+    model_path = f"outputs/models/best_{selected_scope}_model.joblib"
+    try:
+        if os.path.exists(model_path) and not df.is_empty():
+            import joblib
+            from src.modeling import chronological_train_val_test_split, get_model_feature_columns, scale_split, filter_model_scope
+            from src.evaluation import predict_probabilities
+            from sklearn.metrics import confusion_matrix, roc_curve, auc
+            
+            model_data = joblib.load(model_path)
+            
+            if isinstance(model_data, dict):
+                model = None
+                for key in ['model', 'estimator', 'classifier', 'pipeline']:
+                    if key in model_data and hasattr(model_data[key], 'predict'):
+                        model = model_data[key]
+                        break
+                if model is None:
+                    for k, v in model_data.items():
+                        if hasattr(v, 'predict'):
+                            model = v
+                            break
+                if model is None:
+                    raise ValueError(f"Could not find model in dict. Keys: {list(model_data.keys())}")
+            else:
+                model = model_data
+
+            
+            # Prepare data
+            pdf_all = df.to_pandas()
+            scope_df = filter_model_scope(pdf_all, selected_scope)
+            feature_cols = get_model_feature_columns(scope_df)
+            
+            split_data = chronological_train_val_test_split(scope_df, feature_cols)
+            split_data, _ = scale_split(split_data)
+            
+            X_test = split_data.X_test
+            y_test = split_data.y_test
+            
+            # Generate predictions
+            y_pred = model.predict(X_test)
+            y_proba = predict_probabilities(model, X_test)
+            
+            # Confusion Matrix
+            cm = confusion_matrix(y_test, y_pred)
+            cm_fig = px.imshow(
+                cm, 
+                text_auto=True, 
+                labels=dict(x="Predicted", y="Actual"),
+                x=['Down/Neutral', 'Up'], 
+                y=['Down/Neutral', 'Up'],
+                color_continuous_scale="Blues",
+                title=f"Confusion Matrix ({selected_scope.capitalize()})"
+            )
+            cm_fig.update_layout(plot_bgcolor="white", paper_bgcolor="white")
+            
+            # ROC Curve
+            fpr, tpr, _ = roc_curve(y_test, y_proba)
+            roc_auc_val = auc(fpr, tpr)
+            
+            roc_fig.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC = {roc_auc_val:.2f})", mode="lines", line=dict(color="#e74c3c", width=2)))
+            roc_fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random", mode="lines", line=dict(color="#bdc3c7", width=2, dash="dash")))
+            roc_fig.update_layout(
+                title=f"ROC Curve ({selected_scope.capitalize()})",
+                xaxis_title="False Positive Rate",
+                yaxis_title="True Positive Rate",
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                legend=dict(yanchor="bottom", y=0.01, xanchor="right", x=0.99)
+            )
+    except Exception as e:
+        print(f"Error running inference: {e}")
+    
+    return fig, table, cm_fig, roc_fig
 
 @app.callback(
     Output("ticker-timeline-chart", "figure"),
