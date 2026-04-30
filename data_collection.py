@@ -1,3 +1,18 @@
+"""Data collection pipeline for the Bluesky/Yahoo Finance merge.
+
+Design notes for the final-project rubric:
+- The script uses two public sources and links them by cashtag ticker plus hourly
+  timestamp. This is an entity/record-linking assumption: a post mentioning
+  "$AAPL" is treated as relevant to AAPL during that hour, even though the text
+  may include jokes, spam, or broader market commentary.
+- FinBERT is used because it is trained for financial language, but it can still
+  misread social-media slang, sarcasm, emojis, or low-context posts. Downstream
+  notebooks therefore treat sentiment as a noisy feature, not ground truth.
+- Financial values are filled within ticker after the join so off-market social
+  posts retain a market context. Those filled values are context features only;
+  they should not be interpreted as actual off-hours trade prices.
+"""
+
 import os
 import time
 import requests

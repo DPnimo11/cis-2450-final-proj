@@ -55,7 +55,14 @@ def chronological_train_val_test_split(
     test_size: float = TEST_SIZE,
     validation_size: float = VALIDATION_SIZE,
 ) -> SplitData:
-    """Sort by signal time and split into train/validation/test without shuffling."""
+    """Sort by signal time and split into train/validation/test without shuffling.
+
+    This is one of the main leakage controls in the project. A random split would
+    let the model train on future market/social regimes and then evaluate on
+    earlier rows, which is not the real forecasting problem. The validation set
+    is kept between train and test so model/resampling choices are made before
+    looking at final held-out test performance.
+    """
     ordered = df.sort_values(["Timestamp", "Ticker", SCOPE_COLUMN]).reset_index(drop=True)
 
     X = ordered[feature_cols]
@@ -73,7 +80,13 @@ def chronological_train_val_test_split(
 
 
 def scale_split(split: SplitData) -> tuple[SplitData, StandardScaler]:
-    """Fit StandardScaler on train only, then transform validation/test."""
+    """Fit StandardScaler on train only, then transform validation/test.
+
+    The rubric calls out pre-split scaling as a leakage risk. Even though scaling
+    does not use labels, fitting it on the full dataset would use future feature
+    distributions. We therefore fit the scaler once on training rows and reuse it
+    for validation, test, and dashboard inference.
+    """
     scaler = StandardScaler()
     X_train = pd.DataFrame(
         scaler.fit_transform(split.X_train),
@@ -99,7 +112,13 @@ def apply_resampling(
     strategy: str,
     random_state: int = RANDOM_STATE,
 ) -> tuple[pd.DataFrame, np.ndarray]:
-    """Apply train-only imbalance handling."""
+    """Apply train-only imbalance handling.
+
+    Random upsampling and SMOTE are useful comparisons when class balance differs
+    across time/scopes. They must be applied after splitting: duplicating or
+    synthesizing observations before the split would leak training information
+    into validation/test rows and inflate performance.
+    """
     if strategy == "none":
         return X_train, y_train
 
@@ -152,6 +171,14 @@ def available_resampling_strategies() -> list[str]:
 
 
 def base_model_specs(random_state: int = RANDOM_STATE) -> dict[str, object]:
+    """Define the baseline and two more complex model families.
+
+    Logistic Regression is the interpretable baseline. Random Forest and
+    Histogram Gradient Boosting are included because they can model nonlinear
+    interactions among ticker, sentiment, time, volume, and lag features. The
+    final selection can still choose the simple baseline if validation evidence
+    does not support extra complexity.
+    """
     return {
         "logistic_regression": LogisticRegression(
             class_weight="balanced",
@@ -177,6 +204,14 @@ def base_model_specs(random_state: int = RANDOM_STATE) -> dict[str, object]:
 
 
 def tuned_model_specs(random_state: int = RANDOM_STATE) -> dict[str, tuple[object, dict[str, list]]]:
+    """Search spaces for the tree models.
+
+    The grids are intentionally modest: they test depth/leaf-size/learning-rate
+    tradeoffs that control overfitting without turning the project into an
+    expensive brute-force search. Logistic Regression is not tuned here because
+    it is used primarily as a stable baseline, while the rubric rewards tuning
+    at least one stronger model family.
+    """
     return {
         "random_forest_tuned": (
             RandomForestClassifier(
@@ -212,6 +247,13 @@ def run_randomized_search(
     scoring: str = "f1",
     random_state: int = RANDOM_STATE,
 ):
+    """Run randomized hyperparameter search with time-series cross-validation.
+
+    RandomizedSearchCV gives a methodical tuning procedure without evaluating
+    every parameter combination. TimeSeriesSplit keeps validation folds ordered
+    in time, which better matches the forecasting objective than ordinary
+    shuffled cross-validation.
+    """
     cv = TimeSeriesSplit(n_splits=3)
     search = RandomizedSearchCV(
         estimator=estimator,

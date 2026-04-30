@@ -1,3 +1,12 @@
+"""Interactive dashboard for EDA and model-result communication.
+
+The dashboard is intentionally explanatory rather than a live trading interface.
+It exposes data distributions, ticker timelines, confusion matrices, and ROC
+curves so viewers can see both the useful patterns and the limitations. This
+supports the rubric's dashboard/presentation criteria: the demo should not just
+show charts, but should help explain why the final conclusion is modest.
+"""
+
 import dash
 from dash import dcc, html, Input, Output, dash_table
 import plotly.express as px

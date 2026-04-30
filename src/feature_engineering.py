@@ -120,7 +120,13 @@ def build_clean_hourly_dataset(
     start=CLEAN_FINANCE_START,
     end=None,
 ) -> pl.DataFrame:
-    """Build the Step 1 clean modeling input: valid finance window plus ticker-hour rows."""
+    """Build the Step 1 clean modeling input: valid finance window plus ticker-hour rows.
+
+    The raw file is post-level, but the forecasting decision is ticker-hour level.
+    Aggregation prevents a viral hour from being counted as many independent
+    training labels while still preserving social intensity through Post_Count
+    and sentiment distribution features.
+    """
     valid_df = filter_valid_finance_window(df, start=start, end=end)
     return aggregate_to_ticker_hour(valid_df)
 
@@ -151,7 +157,13 @@ def add_thresholded_direction_target(
     target_col: str = "Target_Direction",
     drop_neutral: bool = True,
 ) -> pl.DataFrame:
-    """Convert returns to a tunable binary target and optionally drop tiny moves."""
+    """Convert returns to a tunable binary target and optionally drop tiny moves.
+
+    The threshold is a modeling judgment: tiny hourly returns are often noise, so
+    classifying them as up/down can create labels that are technically correct
+    but not meaningful. Dropping neutral moves improves target clarity at the
+    cost of a smaller, less universal labeled dataset.
+    """
     labeled = df.with_columns(
         pl.when(pl.col(return_col) > threshold)
         .then(pl.lit(1))
@@ -386,7 +398,13 @@ def build_hybrid_target_dataset(
     max_overnight_horizon_hours: int = MAX_OVERNIGHT_HORIZON_HOURS,
     drop_neutral: bool = True,
 ) -> pl.DataFrame:
-    """Build the final Step 2 target dataset with intraday and overnight rows."""
+    """Build the final Step 2 target dataset with intraday and overnight rows.
+
+    Intraday and overnight sentiment are different prediction settings. Market
+    hours can reflect immediate reaction while off-market posts may accumulate
+    before the next open. Keeping both target types, plus an Is_Overnight flag,
+    lets the model use shared features without hiding that structural difference.
+    """
     hourly_df = recompute_bullishness_index(hourly_df)
     intraday = build_intraday_target_rows(
         hourly_df,
@@ -563,7 +581,13 @@ def build_feature_dataset(
     hourly_df: pl.DataFrame,
     rolling_window: int = ROLLING_FEATURE_WINDOW,
 ) -> pl.DataFrame:
-    """Build the final model-ready feature dataset from hybrid targets and hourly history."""
+    """Build the final model-ready feature dataset from hybrid targets and hourly history.
+
+    Target price/return columns remain in the saved CSV for auditing and EDA, but
+    src.modeling.get_model_feature_columns deliberately excludes them from model
+    features. This separation keeps the artifact explainable while preventing
+    target leakage during training.
+    """
     hourly_features = build_hourly_history_features(hourly_df, rolling_window=rolling_window)
     featured = (
         hybrid_df.join(hourly_features, on=["Ticker", "Timestamp"], how="left")

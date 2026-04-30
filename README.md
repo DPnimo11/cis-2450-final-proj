@@ -131,6 +131,15 @@ The honest modeling conclusion is that sentiment and social activity provide a l
 - Modeling: notebook 03 includes a baseline model, two ensemble/advanced model families, chronological splits, train-only scaling, train-only resampling comparisons, hyperparameter tuning, and multiple metrics.
 - Course topics used: Polars/data wrangling, text/sentiment modeling with FinBERT, supervised learning, time-series feature engineering, ensemble models, imbalance handling, hyperparameter tuning, Plotly/dashboard visualization.
 
+## Rubric Rationale and Limitations
+
+The notebooks now make the main rubric-facing reasoning explicit:
+
+- **EDA assumptions and bias:** Notebook 01 documents source bias from Bluesky, ticker-selection bias, API/search coverage limits, FinBERT domain mismatch on social-media language, Yahoo Finance hourly-data assumptions, temporal nonstationarity, and the tradeoff created by dropping neutral target moves.
+- **Preprocessing justification:** Notebook 02 explains why the project aggregates to ticker-hours, why the Yahoo Finance coverage cutoff is used, why the intraday/overnight target is split, why neutral moves are dropped, how nulls/outliers are handled, why the OHLC correlation issue is acknowledged instead of silently ignored, and why imbalance handling must happen after splitting.
+- **Model choice justification:** Notebook 03 explains why Logistic Regression is the baseline, why Random Forest and Histogram Gradient Boosting are the more complex models, why an additional neural classifier was not chosen, what biases the models may learn, and why F1/ROC-AUC/PR-AUC/confusion matrices are used instead of accuracy alone.
+- **Conclusion discipline:** The project should be presented as evidence of limited directional signal, not as a production trading system. The near-random ROC-AUC scores are an important limitation and should be stated directly in the presentation.
+
 ## Run Checks
 
 Use the notebooks in order:
