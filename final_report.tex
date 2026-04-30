@@ -1,0 +1,344 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=0.8in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+}
+
+\setlist[itemize]{leftmargin=*}
+\setlist[enumerate]{leftmargin=*}
+\renewcommand{\arraystretch}{1.15}
+
+\title{\textbf{Financial Sentiment and Short-Term Stock Direction}\\
+\large CIS 2450 Big Data Analytics Final Project Report}
+\author{Team Members: \underline{\hspace{2in}} \quad \underline{\hspace{2in}}}
+\date{April 30, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project studies whether social-media sentiment from Bluesky adds useful short-term signal for predicting stock price direction. We collect Bluesky cashtag posts, score them with FinBERT, merge them with Yahoo Finance hourly OHLCV data, engineer ticker-hour and time-series features, and train supervised classifiers for combined, intraday, and overnight prediction tasks. The final result is intentionally honest: the best models achieve F1 scores around 0.56 to 0.61, but ROC-AUC remains close to random, so sentiment appears to provide only a limited directional edge in this sample.
+\end{abstract}
+
+\section{Objective and Value Proposition}
+
+The project objective is to test whether public social sentiment around actively discussed stocks can help predict short-term price direction. The practical value is not to build a production trading system, but to evaluate whether social-media attention and financial sentiment provide measurable context beyond recent market prices and volume.
+
+The final prediction target is binary:
+\[
+\texttt{Target\_Direction} =
+\begin{cases}
+1 & \text{if the future return is greater than } +0.1\%\\
+0 & \text{if the future return is less than } -0.1\%
+\end{cases}
+\]
+Tiny returns between those thresholds are dropped because they are noisy and less meaningful for a directional classifier.
+
+\section{Data Sources and Collection}
+
+\begin{itemize}
+    \item \textbf{Bluesky social posts:} Posts mentioning stock cashtags such as \texttt{\$AAPL}, \texttt{\$NVDA}, and \texttt{\$TSLA} are fetched with the \texttt{atproto} API. Post text is cleaned, timestamped to the nearest UTC hour, and scored with ProsusAI/FinBERT.
+    \item \textbf{Yahoo Finance hourly market data:} Hourly OHLCV bars are fetched with \texttt{yfinance} for the same ticker universe. Timestamps are normalized to UTC and truncated to hourly resolution.
+\end{itemize}
+
+The two sources are linked by ticker and hour. This is a key design choice because the raw unit of observation is a post, while the prediction unit is a ticker-hour signal. The data collection script performs a left join from social posts to finance bars, forward/backward fills market values within ticker when posts occur outside trading hours, removes rows still missing core values, and saves the merged data to \path{data/raw/merged_financial_sentiment_data.csv}.
+
+\begin{table}[H]
+\centering
+\caption{Current Data Audit}
+\begin{tabular}{lr}
+\toprule
+Check & Value \\
+\midrule
+Raw merged rows & 194,891 \\
+Raw columns & 10 \\
+Unique tickers & 23 \\
+Unique raw ticker-hours & 55,982 \\
+Clean post rows after finance cutoff & 193,106 \\
+Clean ticker-hour rows after finance cutoff & 54,572 \\
+Final labeled modeling rows & 13,325 \\
+Final feature columns & 70 \\
+Null values in raw and feature tables & 0 \\
+Duplicate final signal/target rows & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This satisfies the specification's requirement for at least two distinct public data sources and 50,000+ cleaned rows used in the analysis. The supervised modeling subset is smaller because it is a stricter labeled derivative after ticker-hour aggregation, horizon rules, and neutral-return filtering.
+
+\section{Exploratory Data Analysis}
+
+The EDA notebook \path{notebooks/01_data_audit_and_eda.ipynb} produces six slide-ready charts in \path{outputs/figures/}. The presentation should use the strongest 3 to 5 of these visuals.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\linewidth]{eda_01_ticker_coverage.png}
+\includegraphics[width=0.48\linewidth]{eda_02_sentiment_distribution.png}
+\caption{Ticker coverage and FinBERT sentiment distribution.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\linewidth]{eda_03_monthly_activity_sentiment.png}
+\includegraphics[width=0.48\linewidth]{eda_04_target_balance.png}
+\caption{Monthly activity and final target balance.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\linewidth]{eda_05_sentiment_vs_target.png}
+\includegraphics[width=0.48\linewidth]{eda_06_example_ticker_timeline.png}
+\caption{Sentiment versus future return and an example ticker timeline.}
+\end{figure}
+
+Main EDA findings:
+
+\begin{itemize}
+    \item The dataset is large enough for the project: roughly 195k raw post-level rows and 54,572 clean ticker-hour observations after the finance cutoff.
+    \item Social attention is uneven across tickers, so ticker indicators are included in the feature set.
+    \item FinBERT sentiment is mostly neutral: 48,423 negative, 86,305 neutral, and 60,163 positive raw posts using the project thresholds.
+    \item Social activity is bursty, especially near April 2026. This motivated post-count anomaly and volume anomaly features.
+    \item The old post-level target was badly imbalanced: 187,033 down/neutral versus 7,835 up. The redesigned hybrid target is much more balanced.
+    \item Sentiment has weak standalone signal. Intraday up rates stay close to 50\% across sentiment quintiles, while overnight rows show a clearer but still modest increase from low to high sentiment.
+\end{itemize}
+
+\section{Preprocessing and Feature Engineering}
+
+The feature engineering notebook \path{notebooks/02_feature_engineering.ipynb} builds \path{data/processed/feature_dataset.csv}. The pipeline uses Polars for data wrangling and keeps target leakage fields out of the model feature list.
+
+Important design choices:
+
+\begin{itemize}
+    \item \textbf{Ticker-hour aggregation:} Raw post rows are grouped to one row per ticker-hour so popular hours do not become repeated target labels.
+    \item \textbf{Finance window filter:} Modeling starts on June 1, 2024 to stay inside reliable Yahoo Finance hourly coverage.
+    \item \textbf{Hybrid target:} Intraday rows predict the next same-day market bar. Overnight rows aggregate off-market sentiment and predict the next open gap from the prior market close.
+    \item \textbf{Thresholded labels:} A 0.1\% return threshold drops tiny neutral moves and produces clearer up/down labels.
+    \item \textbf{Sentiment features:} Mean, median, standard deviation, min, max, FinBERT positive/negative/neutral counts, bullishness index, short and long sentiment EMAs, and rolling sentiment z-score.
+    \item \textbf{Market/time features:} Hourly return, lagged close returns, high-low range, log volume, volume z-score, post-count z-score, cyclic hour/weekday encodings, target-type flags, and ticker indicators.
+    \item \textbf{Outlier handling:} The classification target uses direction rather than raw return magnitude, log volume reduces skew, and rolling z-score features are clipped to avoid extreme anomaly values dominating the models.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Final Target Balance}
+\begin{tabular}{llr}
+\toprule
+Target Type & Direction & Rows \\
+\midrule
+Intraday & Down & 4,995 \\
+Intraday & Up & 5,001 \\
+Overnight & Down & 1,587 \\
+Overnight & Up & 1,742 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Modeling Methodology}
+
+The modeling notebook \path{notebooks/03_modeling_and_results.ipynb} trains models on three scopes:
+
+\begin{itemize}
+    \item \textbf{Combined:} all labeled rows.
+    \item \textbf{Intraday:} regular-market sentiment predicting the next same-day bar.
+    \item \textbf{Overnight:} off-market sentiment predicting the next open gap.
+\end{itemize}
+
+The model pipeline is designed to avoid leakage:
+
+\begin{itemize}
+    \item Rows are sorted chronologically before train/validation/test splitting.
+    \item Scaling is fit on training data only, then applied to validation and test data.
+    \item Random upsampling and SMOTE are applied only to the training split.
+    \item Validation F1 selects the model and resampling strategy.
+    \item Test metrics are reported only after final model selection.
+\end{itemize}
+
+Models trained:
+
+\begin{itemize}
+    \item \textbf{Baseline: Logistic Regression.} This is simple, interpretable, and appropriate as the baseline classifier.
+    \item \textbf{Random Forest.} This ensemble can capture non-linear interactions and provides feature importance.
+    \item \textbf{Histogram Gradient Boosting.} This boosted tree method is a stronger tabular model family for non-linear relationships.
+\end{itemize}
+
+Random Forest and Histogram Gradient Boosting are tuned with \texttt{RandomizedSearchCV} and \texttt{TimeSeriesSplit}. Evaluation uses precision, recall, F1, ROC-AUC, PR-AUC, and confusion matrices rather than relying on accuracy.
+
+\section{Results}
+
+\begin{table}[H]
+\centering
+\caption{Selected Test Results}
+\begin{tabular}{llllrrrr}
+\toprule
+Scope & Model & Resampling & Split & Precision & Recall & F1 & ROC-AUC \\
+\midrule
+Combined & Logistic Regression & None & Test & 0.528 & 0.718 & 0.609 & 0.533 \\
+Intraday & Logistic Regression & None & Test & 0.526 & 0.604 & 0.562 & 0.505 \\
+Overnight & Tuned Random Forest & None & Test & 0.508 & 0.766 & 0.611 & 0.513 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Interpretation:
+
+\begin{itemize}
+    \item The best F1 scores are around 0.56 to 0.61, which means the models identify some directional structure.
+    \item ROC-AUC remains close to 0.50 to 0.53, so probability ranking is only slightly better than random.
+    \item Random upsampling and SMOTE were tested but not selected by validation F1. This is a useful result: the redesigned target already improves class balance, and extra resampling did not reliably improve validation performance.
+    \item For the selected overnight Random Forest, the most important features include hourly return, sentiment EMAs, sentiment z-score, post-count z-score, volume z-score, sentiment min/max/median, and bullishness index. This supports the conclusion that sentiment is most useful when combined with recent market context and activity anomalies.
+\end{itemize}
+
+Final conclusion: Bluesky sentiment and activity provide a limited directional signal, especially for overnight gaps, but the evidence is not strong enough to claim robust predictive power. The project's main value is the end-to-end data pipeline, feature design, and careful evaluation of a noisy real-world signal.
+
+\section{Dashboard Demo}
+
+The dashboard is implemented in \path{dashboard.py} with Dash and Plotly. It loads \path{data/processed/feature_dataset.csv}, result tables from \path{outputs/tables/}, and saved model artifacts from \path{outputs/models/}. A local smoke test confirmed that the dashboard imports correctly, sees 13,325 feature rows and 23 tickers, and that the EDA, timeline, and model callbacks return figures for all three model scopes.
+
+Dashboard tabs:
+
+\begin{itemize}
+    \item \textbf{Exploratory Data Analysis:} Interactive sentiment and volume distributions plus the six saved EDA charts.
+    \item \textbf{Model Evaluation:} Test-set metric comparisons, result table, live confusion matrix, and ROC curve by model scope.
+    \item \textbf{Interactive Explorer:} Ticker-level timeline of close price and sentiment.
+\end{itemize}
+
+Recommended dashboard demo flow for the video:
+
+\begin{enumerate}
+    \item Open with the EDA tab and show that sentiment is mostly neutral and activity varies by ticker.
+    \item Switch to Model Evaluation, select combined, intraday, and overnight scopes, and explain why F1 and ROC-AUC tell different stories.
+    \item Use the Interactive Explorer for one recognizable ticker, such as \texttt{\$AAPL}, to connect social sentiment to market movement.
+\end{enumerate}
+
+\section{Rubric Alignment}
+
+\begin{longtable}{p{0.24\linewidth}p{0.18\linewidth}p{0.50\linewidth}}
+\caption{Project Rubric Coverage}\\
+\toprule
+Rubric Area & Status & Evidence \\
+\midrule
+\endfirsthead
+\toprule
+Rubric Area & Status & Evidence \\
+\midrule
+\endhead
+Proposal & Verify externally & The repository contains \path{cis_2450_final_project_proposal.pdf}. Confirm it was submitted on time and that all group members were added on Gradescope. \\
+Intermediate check-in & Verify externally & The codebase cannot prove attendance or TA meeting completion. Confirm this administratively. \\
+EDA & Met & Notebook 01 provides data context, null checks, coverage, distributions, target balance, sentiment-vs-return diagnostics, and six polished visuals with markdown takeaways. \\
+Preprocessing and feature engineering & Met & Efficient API collection, source joining, timestamp normalization, null handling, ticker-hour aggregation, hybrid target construction, log/z-score/EMA features, ticker indicators, train-only scaling, and train-only resampling. \\
+Model implementation & Met & Baseline Logistic Regression plus Random Forest and Histogram Gradient Boosting. Chronological train/validation/test split avoids shuffled time leakage. \\
+Model assessment and tuning & Met & Precision, recall, F1, ROC-AUC, PR-AUC, confusion matrices, validation-based model selection, and RandomizedSearchCV for tree models. \\
+Code quality/readability & Met & Code is split into \path{src/} modules, notebooks are organized by workflow stage, outputs are stored under \path{outputs/}, and README/context files explain how to run the project. \\
+Dashboard demo & Met, polish subject to demo quality & Dash app covers EDA, model evaluation, and ticker exploration. Smoke-tested against current artifacts. Demo should be practiced to ensure a polished 20-point presentation. \\
+Presentation & Ready, must record & This report includes the content and timing plan. Final video must be 8-10 minutes, use slides with no code, and have all members speak with cameras on. \\
+\bottomrule
+\end{longtable}
+
+\subsection*{Difficulty Concepts}
+
+The rubric awards depth for the best three concepts. The strongest three to emphasize are:
+
+\begin{longtable}{p{0.22\linewidth}p{0.32\linewidth}p{0.38\linewidth}}
+\toprule
+Concept & Where It Is Used & Why It Matters \\
+\midrule
+Feature engineering & \path{src/feature_engineering.py}, Notebook 02 & Hybrid intraday/overnight target, sentiment EMAs, z-scores, lag returns, volume anomaly, post-count anomaly, cyclic time features, target flags, and ticker indicators. These features directly address EDA findings about neutral sentiment, bursty activity, and time-dependent market behavior. \\
+Ensemble models & \path{src/modeling.py}, Notebook 03 & Random Forest and Histogram Gradient Boosting model non-linear relationships between sentiment, market context, ticker identity, and time. Random Forest also provides feature importance. \\
+Hyperparameter tuning & Notebook 03 & RandomizedSearchCV with TimeSeriesSplit tunes the tree models without using the test set. Tuning results are reflected in the final overnight model selection. \\
+\bottomrule
+\end{longtable}
+
+Additional difficulty support includes imbalance handling with random upsampling and SMOTE, feature importance from the selected Random Forest, Plotly/Dash visualization, and entity/record linking through cashtag-to-ticker alignment and hourly joins.
+
+\subsection*{Course Topics Applied}
+
+The rubric requires at least six course topics for full credit. This project applies at least eight:
+
+\begin{enumerate}
+    \item \textbf{Polars:} Used throughout loading, cleaning, aggregation, joining, feature engineering, and validation.
+    \item \textbf{Text representations / LLMs:} FinBERT converts post text into finance-specific sentiment scores.
+    \item \textbf{Deep learning / Transformers:} FinBERT is a transformer-based model and runs with GPU detection when available.
+    \item \textbf{Record/entity linking:} Bluesky cashtags are mapped to stock tickers and linked to Yahoo Finance bars.
+    \item \textbf{Joins:} Social and financial data are joined on normalized \texttt{Ticker} and hourly \texttt{Timestamp}.
+    \item \textbf{Time series:} Chronological splits, hourly bars, lag returns, EMAs, rolling z-scores, intraday/overnight horizons, and cyclic time features.
+    \item \textbf{Supervised learning:} Binary classification models predict future up/down direction.
+    \item \textbf{Different methods of hyperparameter tuning:} RandomizedSearchCV with TimeSeriesSplit is used for tree-based model tuning.
+\end{enumerate}
+
+\section{Presentation and Video Plan}
+
+Target runtime: 8 to 10 minutes. Do not show code on slides.
+
+\begin{table}[H]
+\centering
+\caption{Recommended 9-Minute Run of Show}
+\begin{tabular}{p{0.18\linewidth}p{0.28\linewidth}p{0.44\linewidth}}
+\toprule
+Time & Section & Talking Points \\
+\midrule
+0:00-0:45 & Objective & Can social sentiment help predict short-term stock direction? Define value proposition and stakeholder interest. \\
+0:45-1:45 & Data & Bluesky posts, FinBERT sentiment, Yahoo Finance hourly OHLCV, 23 tickers, 194,891 raw rows, 54,572 clean ticker-hours. \\
+1:45-3:30 & EDA & Use ticker coverage, sentiment distribution, monthly activity, and target balance. Emphasize neutral sentiment and bursty activity. \\
+3:30-5:00 & Feature engineering & Explain ticker-hour aggregation, hybrid intraday/overnight target, 0.1\% threshold, sentiment/market/time features. \\
+5:00-6:45 & Modeling & Logistic Regression baseline, Random Forest, Histogram Gradient Boosting, chronological split, train-only scaling/resampling, tuning. \\
+6:45-7:45 & Results & Best F1 around 0.56-0.61; ROC-AUC near 0.50-0.53; limited but nonzero signal, no overclaiming. \\
+7:45-8:45 & Dashboard demo & Show EDA tab, model evaluation tab, and ticker explorer. \\
+8:45-9:30 & Limitations and future work & More data, stricter duplicate handling, richer text embeddings, market regime features, calibration/backtesting. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Suggested slide list:
+
+\begin{enumerate}
+    \item Title, team members, one-sentence objective.
+    \item Data pipeline diagram: Bluesky posts + FinBERT + Yahoo Finance + hourly join.
+    \item EDA chart: ticker coverage.
+    \item EDA chart: sentiment distribution and monthly activity.
+    \item Target construction: intraday versus overnight.
+    \item Modeling setup: features, split, models, metrics.
+    \item Results table and honest conclusion.
+    \item Dashboard screenshots or live demo transition.
+    \item Limitations, future work, and final takeaway.
+\end{enumerate}
+
+\section{Limitations and Future Work}
+
+\begin{itemize}
+    \item \textbf{Weak predictive signal:} ROC-AUC is near random, so the current feature set is not enough for a reliable trading strategy.
+    \item \textbf{Social data noise:} Cashtag posts can include spam, repeated posts, jokes, or non-investment discussion.
+    \item \textbf{Raw duplicates:} The final target table has zero duplicate signal/target rows, but exact duplicate raw post keys were observed in the raw audit. Future work should deduplicate exact post keys before ticker-hour aggregation.
+    \item \textbf{Market regime dependence:} The relationship between sentiment and price may differ during earnings, macro announcements, or meme-stock events.
+    \item \textbf{Future modeling:} Try calibrated probabilities, richer text embeddings, event filters, per-ticker models, longer collection windows, and out-of-time backtesting.
+\end{itemize}
+
+\section{Submission Checklist}
+
+Before final submission:
+
+\begin{itemize}
+    \item Confirm \path{data/raw/merged_financial_sentiment_data.csv} and \path{data/processed/feature_dataset.csv} are included in the final zip, since \path{data/} is gitignored.
+    \item Confirm \path{outputs/figures/}, \path{outputs/tables/}, and \path{outputs/models/} are included.
+    \item Confirm the proposal and final submission include all group members on Gradescope.
+    \item Record an 8-10 minute presentation with slides, no code, all members speaking, and cameras on.
+    \item Practice the dashboard demo locally with \texttt{python dashboard.py} and open \url{http://127.0.0.1:8050}.
+\end{itemize}
+
+\section{Final Takeaway}
+
+The project meets the core technical requirements: two public data sources, 50,000+ cleaned analysis rows, modular code, Polars-based data wrangling, EDA, feature engineering, supervised modeling, tuning, imbalance handling, saved artifacts, and an interactive dashboard. The strongest scientific finding is also the honest one: social sentiment is measurable and sometimes directionally useful, especially around overnight gaps, but it is not a strong standalone predictor in this dataset.
+
+\end{document}

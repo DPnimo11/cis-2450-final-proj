@@ -3,7 +3,6 @@ polars
 pyarrow
 requests
 yfinance
-nltk
 matplotlib
 seaborn
 scikit-learn

@@ -109,23 +109,25 @@ def render_eda_tab():
         return html.Div("No data available. Please ensure data collection is complete.")
     
     # Static EDA Images
-    image_paths = [
-        "outputs/figures/eda_01_ticker_coverage.png",
-        "outputs/figures/eda_02_sentiment_distribution.png",
-        "outputs/figures/eda_03_monthly_activity_sentiment.png",
-        "outputs/figures/eda_04_target_balance.png",
-        "outputs/figures/eda_05_sentiment_vs_target.png",
-        "outputs/figures/eda_06_example_ticker_timeline.png"
+    image_info = [
+        ("outputs/figures/eda_01_ticker_coverage.png", "Ticker Coverage", "Shows the total volume of scraped posts per ticker, identifying our most and least discussed assets."),
+        ("outputs/figures/eda_02_sentiment_distribution.png", "Sentiment Distribution", "Highlights the strong skew toward neutral sentiment scores natively output by FinBERT."),
+        ("outputs/figures/eda_03_monthly_activity_sentiment.png", "Monthly Activity", "Tracks the total volume of posts and average sentiment across the dataset's timeline."),
+        ("outputs/figures/eda_04_target_balance.png", "Target Balance", "Displays the class balance of our hybrid target, confirming our 0.1% threshold helps equalize Up vs Down classes."),
+        ("outputs/figures/eda_05_sentiment_vs_target.png", "Sentiment vs Target", "Analyzes the distribution of sentiment scores across the target classes. Overlap indicates sentiment alone is a weak predictor."),
+        ("outputs/figures/eda_06_example_ticker_timeline.png", "Example Timeline", "A time-series plot of $NVDA price action versus rolling sentiment EMA, demonstrating our temporal join.")
     ]
     
     image_divs = []
-    for path in image_paths:
+    for path, title, description in image_info:
         src = b64_image(path)
         if src:
             image_divs.append(
                 html.Div([
-                    html.Img(src=src, style={"width": "100%", "borderRadius": "8px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"})
-                ], style={"width": "48%", "display": "inline-block", "margin": "1%", "verticalAlign": "top"})
+                    html.Img(src=src, style={"width": "100%", "borderRadius": "8px", "boxShadow": "0 2px 4px rgba(0,0,0,0.1)", "marginBottom": "10px"}),
+                    html.H5(title, style={"color": "#2c3e50", "margin": "0 0 5px 0"}),
+                    html.P(description, style={"color": "#7f8c8d", "fontSize": "14px", "margin": "0"})
+                ], style={"width": "48%", "display": "inline-block", "margin": "1%", "verticalAlign": "top", "padding": "10px", "backgroundColor": "#f9fbfc", "borderRadius": "8px", "boxSizing": "border-box"})
             )
     
     return html.Div([

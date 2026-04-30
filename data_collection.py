@@ -28,71 +28,7 @@ finbert = pipeline("sentiment-analysis", model="ProsusAI/finbert", top_k=None, d
 # ==========================================
 BLUESKY_HANDLE = os.environ.get('BLUESKY_HANDLE', 'dpnimo11.bsky.social')
 BLUESKY_PASSWORD = os.environ.get('BLUESKY_PASSWORD', '')
-"""
-def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
-    
-    Fetches historical posts from Bluesky containing a specific cashtag via atproto.
-    
-    print(f"Fetching Bluesky data for {ticker} using atproto...")
-    
-    client = Client()
-    try:
-        client.login(BLUESKY_HANDLE, BLUESKY_PASSWORD)
-    except Exception as e:
-        print(f"Failed to login to Bluesky. Did you set your handle and app password? Error: {e}")
-        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
-        
-    posts_data = []
-    cursor = None
-    
-    for page in range(max_pages):
-        try:
-            response = client.app.bsky.feed.search_posts(
-                params={'q': ticker, 'limit': limit, 'cursor': cursor}
-            )
-            
-            texts = []
-            valid_posts = []
-            for post in response.posts:
-                text = getattr(post.record, 'text', '')
-                created_at = getattr(post.record, 'created_at', '')
-                
-                if text and created_at:
-                    dt_utc = pd.to_datetime(created_at, utc=True).replace(tzinfo=None)
-                    clean_text = text.replace('\n', ' ').strip()
-                    valid_posts.append((dt_utc, clean_text))
-                    texts.append(clean_text)
-            
-            if texts:
-                sentiments = finbert(texts)
-                for (dt_utc, clean_text), sent_results in zip(valid_posts, sentiments):
-                    # ProsusAI/finbert returns labels 'positive', 'negative', 'neutral'
-                    pos = next((x['score'] for x in sent_results if x['label'] == 'positive'), 0)
-                    neg = next((x['score'] for x in sent_results if x['label'] == 'negative'), 0)
-                    sentiment_score = pos - neg
-                    
-                    posts_data.append({
-                        "Ticker": ticker,
-                        "Timestamp": dt_utc,
-                        "Text": clean_text,
-                        "Sentiment": sentiment_score
-                    })
-            
-            cursor = getattr(response, 'cursor', None)
-            if not cursor:
-                break
-                
-            time.sleep(1) # Rate limit safety
-            
-        except Exception as e:
-            print(f"Error fetching page {page} for {ticker}: {e}")
-            break
-            
-    if not posts_data:
-        return pl.DataFrame(schema={"Ticker": pl.Utf8, "Timestamp": pl.Datetime, "Text": pl.Utf8, "Sentiment": pl.Float64})
-        
-    return pl.DataFrame(posts_data)
-"""
+
 def fetch_bluesky_posts(ticker, limit=100, max_pages=10):
     """
     Fetches historical posts from Bluesky containing a specific cashtag via atproto.
